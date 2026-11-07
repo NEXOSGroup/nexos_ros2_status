@@ -23,8 +23,9 @@ const TABS = [
 ]
 
 function useHeaderStats(ros, status) {
-  const [stats, setStats] = useState({ nodes: 0, topics: 0, err: 0, warn: 0 })
+  const [stats, setStats] = useState({ nodes: 0, topics: 0, err: 0, warn: 0, diagErr: 0, diagWarn: 0 })
   const ev = useRef({ err: [], warn: [] })
+  const diag = useRef({})
 
   useEffect(() => {
     if (!ros || status !== 'connected') return
@@ -42,14 +43,19 @@ function useHeaderStats(ros, status) {
       if (m.level >= 40) ev.current.err.push(now)
       else if (m.level >= 30) ev.current.warn.push(now)
     })
+    const diagTopic = new ROSLIB.Topic({ ros, name: '/diagnostics', messageType: 'diagnostic_msgs/msg/DiagnosticArray' })
+    diagTopic.subscribe((m) => { (m.status || []).forEach((s) => { diag.current[s.name] = s.level }) })
     const tick = setInterval(() => {
       const now = Date.now()
       ev.current.err = ev.current.err.filter((t) => now - t < 60000)
       ev.current.warn = ev.current.warn.filter((t) => now - t < 60000)
-      if (alive) setStats((s) => ({ ...s, err: ev.current.err.length, warn: ev.current.warn.length }))
+      const levels = Object.values(diag.current)
+      const diagErr = levels.filter((l) => l === 2).length
+      const diagWarn = levels.filter((l) => l === 1).length
+      if (alive) setStats((s) => ({ ...s, err: ev.current.err.length, warn: ev.current.warn.length, diagErr, diagWarn }))
     }, 2000)
 
-    return () => { alive = false; clearInterval(id); clearInterval(tick); try { rosout.unsubscribe() } catch (e) {} }
+    return () => { alive = false; clearInterval(id); clearInterval(tick); try { rosout.unsubscribe() } catch (e) {}; try { diagTopic.unsubscribe() } catch (e) {} }
   }, [ros, status])
 
   return stats
@@ -70,8 +76,8 @@ export default function App() {
 
   let health = { c: 'success', t: 'OK' }
   if (!connected) health = { c: 'default', t: 'GETRENNT' }
-  else if (stats.err > 0) health = { c: 'error', t: 'PROBLEM' }
-  else if (stats.warn > 0) health = { c: 'warning', t: 'WARN' }
+  else if (stats.err > 0 || stats.diagErr > 0) health = { c: 'error', t: 'PROBLEM' }
+  else if (stats.warn > 0 || stats.diagWarn > 0) health = { c: 'warning', t: 'WARN' }
 
   const Panel = TABS[tab][1]
 
@@ -111,6 +117,8 @@ export default function App() {
             <Chip size="small" variant="outlined" label={`${stats.topics} Topics`} />
             <Chip size="small" variant="outlined" color={stats.warn ? 'warning' : 'default'} label={`${stats.warn} Warn/60s`} />
             <Chip size="small" variant="outlined" color={stats.err ? 'error' : 'default'} label={`${stats.err} Err/60s`} />
+            <Chip size="small" variant="outlined" color={stats.diagErr ? 'error' : stats.diagWarn ? 'warning' : 'default'}
+              label={`Diag ${stats.diagErr}✕ / ${stats.diagWarn}⚠`} />
             <Chip size="small" color={health.c} label={health.t} />
           </Stack>
         </Toolbar>
