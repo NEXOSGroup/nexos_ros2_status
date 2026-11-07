@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ros_status — NEXOS ROS 2 Live Status</title>
+<script src="roslib.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --border:#2a333d;
+    --txt:#e6edf3; --muted:#8b98a5; --gold:#c8a34e;
+    --ok:#3fb950; --info:#58a6ff; --warn:#d29922; --err:#f85149; --fatal:#ff6a69;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:14px 20px;
+         border-bottom:1px solid var(--border);background:var(--panel)}
+  header .logo{font-weight:700;letter-spacing:.5px}
+  header .logo b{color:var(--gold)}
+  header .sub{color:var(--muted);font-size:12px}
+  .pill{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;
+        padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--panel2)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot.on{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  .dot.off{background:var(--err);box-shadow:0 0 10px var(--err)}
+  main{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px;max-width:1200px;margin:0 auto}
+  @media(max-width:820px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .card h2{margin:0;padding:12px 16px;font-size:13px;text-transform:uppercase;
+           letter-spacing:.6px;color:var(--muted);border-bottom:1px solid var(--border);
+           display:flex;align-items:center;gap:8px}
+  .card h2 .count{margin-left:auto;color:var(--gold);font-weight:700}
+  .list{max-height:60vh;overflow:auto}
+  .node{padding:9px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center}
+  .node:last-child{border-bottom:0}
+  .node .nd{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+  .node code{color:var(--txt);word-break:break-all}
+  .toolbar{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--panel2)}
+  .toolbar button{background:transparent;color:var(--muted);border:1px solid var(--border);
+                  border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px}
+  .toolbar button.active{color:var(--txt);border-color:var(--gold)}
+  .log{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+       max-height:66vh;overflow:auto}
+  .row{padding:6px 14px;border-bottom:1px solid #1f2630;display:grid;
+       grid-template-columns:70px 160px 1fr;gap:10px;align-items:baseline}
+  .row:hover{background:var(--panel2)}
+  .lvl{font-weight:700}
+  .lvl.DEBUG{color:var(--muted)} .lvl.INFO{color:var(--info)}
+  .lvl.WARN{color:var(--warn)} .lvl.ERROR{color:var(--err)} .lvl.FATAL{color:var(--fatal)}
+  .src{color:var(--gold);word-break:break-all}
+  .msg{white-space:pre-wrap;word-break:break-word}
+  .empty{padding:18px 16px;color:var(--muted)}
+  .foot{color:var(--muted);font-size:12px;text-align:center;padding:10px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="logo"><b>NEXOS</b> ros_status</div>
+    <div class="sub">Live ROS 2 Systemstatus</div>
+  </div>
+  <div class="pill"><span id="dot" class="dot"></span><span id="conn">verbinde …</span></div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Nodes <span class="count" id="nodeCount">0</span></h2>
+    <div class="list" id="nodes"><div class="empty">—</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Log (/rosout) <span class="count" id="logCount">0</span></h2>
+    <div class="toolbar" id="filters">
+      <button data-min="0" class="active">ALLE</button>
+      <button data-min="20">INFO+</button>
+      <button data-min="30">WARN+</button>
+      <button data-min="40">ERROR+</button>
+      <button id="clear" style="margin-left:auto">leeren</button>
+    </div>
+    <div class="log" id="log"><div class="empty">Warte auf Nachrichten …</div></div>
+  </section>
+</main>
+<div class="foot" id="foot"></div>
+
+<script>
+const LVL = {10:'DEBUG',20:'INFO',30:'WARN',40:'ERROR',50:'FATAL'};
+const host = location.hostname || '192.168.0.202';
+const url = `ws://${host}:9090`;
+document.getElementById('foot').textContent = `rosbridge: ${url}`;
+
+const $ = id => document.getElementById(id);
+let minLevel = 0, logs = [], logN = 0;
+
+const ros = new ROSLIB.Ros({ url });
+function setConn(state){
+  const dot = $('dot'), c = $('conn');
+  dot.className = 'dot ' + (state==='on'?'on':state==='off'?'off':'');
+  c.textContent = state==='on' ? 'verbunden' : state==='off' ? 'getrennt' : 'verbinde …';
+}
+ros.on('connection', () => { setConn('on'); refreshNodes(); });
+ros.on('close', () => { setConn('off'); setTimeout(()=>ros.connect(url), 2000); });
+ros.on('error', () => setConn('off'));
+
+function refreshNodes(){
+  ros.getNodes(nodes => {
+    nodes.sort();
+    $('nodeCount').textContent = nodes.length;
+    $('nodes').innerHTML = nodes.length
+      ? nodes.map(n => `<div class="node"><span class="nd"></span><code>${esc(n)}</code></div>`).join('')
+      : '<div class="empty">keine Nodes</div>';
+  }, _ => {});
+}
+setInterval(() => { if (ros.isConnected) refreshNodes(); }, 3000);
+
+const rosout = new ROSLIB.Topic({ ros, name:'/rosout', messageType:'rcl_interfaces/msg/Log' });
+rosout.subscribe(m => {
+  logs.push({ lvl:m.level, name:m.name, msg:m.msg, t:(m.stamp&&m.stamp.sec)||0 });
+  if (logs.length > 500) logs.shift();
+  logN++; $('logCount').textContent = logN;
+  renderLog();
+});
+
+function renderLog(){
+  const box = $('log');
+  const view = logs.filter(l => l.lvl >= minLevel).slice(-200);
+  if (!view.length){ box.innerHTML = '<div class="empty">keine Einträge für diesen Filter</div>'; return; }
+  const near = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  box.innerHTML = view.map(l => {
+    const name = LVL[l.lvl] || l.lvl;
+    return `<div class="row"><span class="lvl ${name}">${name}</span>`
+         + `<span class="src">${esc(l.name)}</span>`
+         + `<span class="msg">${esc(l.msg)}</span></div>`;
+  }).join('');
+  if (near) box.scrollTop = box.scrollHeight;
+}
+
+$('filters').addEventListener('click', e => {
+  if (e.target.id === 'clear'){ logs=[]; logN=0; $('logCount').textContent=0; renderLog(); return; }
+  const b = e.target.closest('button[data-min]'); if(!b) return;
+  minLevel = +b.dataset.min;
+  [...document.querySelectorAll('#filters button[data-min]')].forEach(x=>x.classList.toggle('active', x===b));
+  renderLog();
+});
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+</script>
+</body>
+</html>
