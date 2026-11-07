@@ -7,6 +7,8 @@ import {
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import CloseIcon from '@mui/icons-material/Close'
+import { Gauge, gaugeClasses } from '@mui/x-charts/Gauge'
+import { LineChart } from '@mui/x-charts/LineChart'
 
 const grid2 = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))' }
 const LVL = { 10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL' }
@@ -35,53 +37,115 @@ const Empty = ({ children }) => <Typography sx={{ p: 2, color: 'text.secondary' 
 const mono = { fontFamily: 'ui-monospace,Menlo,monospace', wordBreak: 'break-all' }
 
 /* ---------------- System ---------------- */
+const hv = (host, key) => {
+  const v = (host?.values || []).find((x) => x.key === key)
+  return v ? parseFloat(v.value) : NaN
+}
+const fmtUptime = (s) => {
+  if (!s || isNaN(s)) return '–'
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
+  return (d ? d + 'd ' : '') + h + 'h ' + m + 'm'
+}
+const gcolor = (v, warn, err) => isNaN(v) ? '#8b98a5' : v >= err ? '#f85149' : v >= warn ? '#d29922' : '#3fb950'
+
 export function SystemPanel({ ros }) {
   const [host, setHost] = useState(null)
   const [info, setInfo] = useState([])
+  const hist = useRef([])
+  const [, force] = useState(0)
+
   useEffect(() => {
     if (!ros) return
     const t = new ROSLIB.Topic({ ros, name: '/diagnostics', messageType: 'diagnostic_msgs/msg/DiagnosticArray' })
     t.subscribe((m) => {
       const h = (m.status || []).find((s) => (s.name || '').toLowerCase().startsWith('host'))
-      if (h) setHost(h)
+      if (!h) return
+      setHost(h)
+      hist.current = [...hist.current, { cpu: hv(h, 'CPU %'), temp: hv(h, 'Temp C'), mem: hv(h, 'Mem %') }].slice(-60)
+      force((n) => n + 1)
     })
     const sv = new ROSLIB.Service({ ros, name: '/rosapi/get_ros_version', serviceType: 'rosapi_msgs/srv/GetROSVersion' })
-    sv.callService({},
-      (r) => setInfo([['ROS Distro', r.distro], ['ROS version', r.version]]),
-      () => setInfo([]))
+    sv.callService({}, (r) => setInfo([['ROS Distro', r.distro], ['ROS version', r.version]]), () => setInfo([]))
     return () => { try { t.unsubscribe() } catch (e) {} }
   }, [ros])
 
+  const h = hist.current
+  const gauges = [
+    { label: 'CPU', value: hv(host, 'CPU %'), warn: 80, err: 95, unit: '%', max: 100 },
+    { label: 'RAM', value: hv(host, 'Mem %'), warn: 80, err: 92, unit: '%', max: 100 },
+    { label: 'Disk', value: hv(host, 'Disk / %'), warn: 85, err: 95, unit: '%', max: 100 },
+    { label: 'Temp', value: hv(host, 'Temp C'), warn: 70, err: 82, unit: '°C', max: 100 },
+  ]
+
   return (
-    <Box sx={grid2}>
-      <PanelCard title={`Host-Vitals ${host ? '· ' + (host.hardware_id || '') : ''}`}>
-        {!host ? <Empty>Warte auf nexos_status_agent (/diagnostics) …</Empty> : (
-          <List dense>
-            {(host.values || []).map((v) => {
-              const num = parseFloat(v.value); const pct = /%/.test(v.key) && !isNaN(num)
-              return (
-                <ListItem key={v.key} secondaryAction={<Typography sx={mono}>{v.value}</Typography>}>
-                  <ListItemText primary={v.key} primaryTypographyProps={{ color: 'text.secondary' }} />
-                  {pct && <Box sx={{ width: 120, mr: 10 }}><LinearProgress variant="determinate" value={Math.min(100, num)} /></Box>}
+    <Stack spacing={2}>
+      <Card>
+        <CardHeader title={`Host-Vitals ${host ? '· ' + (host.hardware_id || '') : ''}`}
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+        <Divider />
+        <CardContent>
+          {!host ? <Empty>Warte auf nexos_status_agent …</Empty> : (
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+              {gauges.map((g) => (
+                <Box key={g.label} sx={{ textAlign: 'center' }}>
+                  <Gauge height={160} value={isNaN(g.value) ? 0 : g.value} valueMax={g.max}
+                    startAngle={-110} endAngle={110} innerRadius="66%" cornerRadius="50%"
+                    text={() => (isNaN(g.value) ? '–' : `${g.value.toFixed(0)}${g.unit}`)}
+                    sx={{
+                      [`& .${gaugeClasses.valueArc}`]: { fill: gcolor(g.value, g.warn, g.err) },
+                      [`& .${gaugeClasses.referenceArc}`]: { fill: '#2a333d' },
+                      [`& .${gaugeClasses.valueText}`]: { fontSize: 22, fontWeight: 700 },
+                    }} />
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ mt: -1 }}>{g.label}</Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
+      <Box sx={grid2}>
+        <Card>
+          <CardHeader title="Verlauf · CPU / Temperatur"
+            titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+          <Divider />
+          <CardContent>
+            {h.length > 1 ? (
+              <LineChart height={240}
+                margin={{ top: 20, right: 16, bottom: 20, left: 40 }}
+                xAxis={[{ data: h.map((_, i) => i), scaleType: 'point' }]}
+                series={[
+                  { data: h.map((x) => (isNaN(x.cpu) ? null : x.cpu)), label: 'CPU %', color: '#c8a34e', showMark: false, area: true, curve: 'monotoneX' },
+                  { data: h.map((x) => (isNaN(x.temp) ? null : x.temp)), label: 'Temp °C', color: '#f85149', showMark: false, curve: 'monotoneX' },
+                ]}
+                slotProps={{ legend: { direction: 'row', position: { vertical: 'top', horizontal: 'end' } } }} />
+            ) : <Empty>sammle Messwerte …</Empty>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader title="System" titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+          <Divider />
+          <CardContent sx={{ p: 0 }}>
+            <List dense>
+              {info.map(([k, v]) => (
+                <ListItem key={k} secondaryAction={<Typography sx={mono}>{v}</Typography>}>
+                  <ListItemText primary={k} primaryTypographyProps={{ color: 'text.secondary' }} />
                 </ListItem>
-              )
-            })}
-          </List>
-        )}
-      </PanelCard>
-      <PanelCard title="System">
-        <List dense>
-          {info.map(([k, v]) => (
-            <ListItem key={k} secondaryAction={<Typography sx={mono}>{v}</Typography>}>
-              <ListItemText primary={k} primaryTypographyProps={{ color: 'text.secondary' }} />
-            </ListItem>
-          ))}
-          <ListItem secondaryAction={<Typography sx={mono}>{ros?.socket?.url || ''}</Typography>}>
-            <ListItemText primary="Bridge" primaryTypographyProps={{ color: 'text.secondary' }} />
-          </ListItem>
-        </List>
-      </PanelCard>
-    </Box>
+              ))}
+              <ListItem secondaryAction={<Typography sx={mono}>{fmtUptime(hv(host, 'Uptime s'))}</Typography>}>
+                <ListItemText primary="Uptime" primaryTypographyProps={{ color: 'text.secondary' }} /></ListItem>
+              <ListItem secondaryAction={<Typography sx={mono}>{isNaN(hv(host, 'Load 1m')) ? '–' : hv(host, 'Load 1m').toFixed(2)}</Typography>}>
+                <ListItemText primary="Load (1m)" primaryTypographyProps={{ color: 'text.secondary' }} /></ListItem>
+              <ListItem secondaryAction={<Typography sx={mono}>{isNaN(hv(host, 'Mem total MB')) ? '–' : (hv(host, 'Mem total MB') / 1024).toFixed(1) + ' GB'}</Typography>}>
+                <ListItemText primary="RAM gesamt" primaryTypographyProps={{ color: 'text.secondary' }} /></ListItem>
+              <ListItem secondaryAction={<Typography sx={mono}>{ros?.socket?.url || ''}</Typography>}>
+                <ListItemText primary="Bridge" primaryTypographyProps={{ color: 'text.secondary' }} /></ListItem>
+            </List>
+          </CardContent>
+        </Card>
+      </Box>
+    </Stack>
   )
 }
 
