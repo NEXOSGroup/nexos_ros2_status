@@ -314,17 +314,17 @@ export function DiagnosticsPanel({ ros }) {
                 <Typography variant="caption" color="text.secondary">{s.message}</Typography>
               </Stack>
               {(s.values || []).length > 0 && (
-                <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', mt: 1 }}>
+                <Box sx={{ mt: 1 }}>
                   {(s.values || []).map((v) => {
                     const num = parseFloat(v.value); const pct = /%/.test(v.key) && !isNaN(num)
                     return (
-                      <Box key={v.key}>
-                        <Stack direction="row" justifyContent="space-between">
-                          <Typography variant="caption" color="text.secondary">{v.key}</Typography>
-                          <Typography variant="caption" sx={mono}>{v.value}</Typography>
-                        </Stack>
-                        {pct && <LinearProgress variant="determinate" value={Math.min(100, num)}
-                          sx={{ height: 6, borderRadius: 3, bgcolor: '#2a333d', '& .MuiLinearProgress-bar': { backgroundColor: gcolor(num, 80, 92) } }} />}
+                      <Box key={v.key} sx={{ display: 'grid', gridTemplateColumns: '190px 1fr', gap: 1, alignItems: 'baseline', py: 0.3 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{v.key}</Typography>
+                        <Box>
+                          <Typography variant="caption" sx={{ fontFamily: 'ui-monospace,Menlo,monospace', overflowWrap: 'anywhere', whiteSpace: 'normal' }}>{v.value}</Typography>
+                          {pct && <LinearProgress variant="determinate" value={Math.min(100, num)}
+                            sx={{ height: 6, borderRadius: 3, mt: 0.3, bgcolor: '#2a333d', '& .MuiLinearProgress-bar': { backgroundColor: gcolor(num, 80, 92) } }} />}
+                        </Box>
                       </Box>
                     )
                   })}
@@ -342,6 +342,8 @@ export function DiagnosticsPanel({ ros }) {
 export function ControlPanel({ ros }) {
   const [controllers, setControllers] = useState(null)
   const [hw, setHw] = useState(null)
+  const [hwIfaces, setHwIfaces] = useState(null)
+  const [cmDiag, setCmDiag] = useState({})
   const [joints, setJoints] = useState([])
   const hist = useRef({})
   const [, force] = useState(0)
@@ -352,6 +354,8 @@ export function ControlPanel({ ros }) {
       .callService({}, (r) => setControllers(r.controller || []), () => setControllers([]))
     new ROSLIB.Service({ ros, name: cm + '/list_hardware_components', serviceType: 'controller_manager_msgs/srv/ListHardwareComponents' })
       .callService({}, (r) => setHw(r.component || []), () => setHw([]))
+    new ROSLIB.Service({ ros, name: cm + '/list_hardware_interfaces', serviceType: 'controller_manager_msgs/srv/ListHardwareInterfaces' })
+      .callService({}, (r) => setHwIfaces(r), () => setHwIfaces(null))
   }
   useEffect(() => {
     refresh()
@@ -371,7 +375,13 @@ export function ControlPanel({ ros }) {
       })
       force((n) => n + 1)
     })
-    return () => { try { t.unsubscribe() } catch (e) {} }
+    const td = new ROSLIB.Topic({ ros, name: '/diagnostics', messageType: 'diagnostic_msgs/msg/DiagnosticArray' })
+    td.subscribe((m) => setCmDiag((prev) => {
+      const next = { ...prev }
+      ;(m.status || []).forEach((s) => { if ((s.name || '').includes('controller_manager')) next[s.name] = s })
+      return next
+    }))
+    return () => { try { t.unsubscribe() } catch (e) {}; try { td.unsubscribe() } catch (e) {} }
   }, [ros]) // eslint-disable-line
 
   const stColor = (s) => s === 'active' ? 'success' : s === 'inactive' ? 'warning' : 'default'
@@ -384,7 +394,9 @@ export function ControlPanel({ ros }) {
             controllers.length ? (
               <List dense>{controllers.map((c) => (
                 <ListItem key={c.name} secondaryAction={<Chip size="small" variant="outlined" color={stColor(c.state)} label={c.state} />}>
-                  <ListItemText primary={c.name} secondary={c.type} primaryTypographyProps={{ sx: mono }}
+                  <ListItemText primary={c.name}
+                    secondary={`${c.type}${c.update_rate ? '  ·  ' + c.update_rate + ' Hz' : ''}  ·  ${(c.claimed_interfaces || []).length} claimed`}
+                    primaryTypographyProps={{ sx: mono }}
                     secondaryTypographyProps={{ sx: mono, color: 'text.secondary' }} />
                 </ListItem>
               ))}</List>
@@ -433,6 +445,61 @@ export function ControlPanel({ ros }) {
               </Box>
             )
           }) : <Empty>Warte auf /joint_states … (EPOS-Bringup auf dem UGV starten)</Empty>}
+        </CardContent>
+      </Card>
+
+      <Box sx={grid2}>
+        <PanelCard title="HW-Interfaces · command">
+          {hwIfaces && hwIfaces.command_interfaces ? (hwIfaces.command_interfaces.length ? (
+            <List dense>{hwIfaces.command_interfaces.map((i) => (
+              <ListItem key={i.name} secondaryAction={<Stack direction="row" spacing={0.5}>
+                <Chip size="small" variant="outlined" color={i.is_available ? 'success' : 'default'} label={i.is_available ? 'avail' : 'n/a'} />
+                <Chip size="small" variant="outlined" color={i.is_claimed ? 'warning' : 'default'} label={i.is_claimed ? 'claimed' : 'free'} />
+              </Stack>}>
+                <ListItemText primary={i.name} primaryTypographyProps={{ sx: mono }} />
+              </ListItem>
+            ))}</List>
+          ) : <Empty>keine</Empty>) : <Empty>—</Empty>}
+        </PanelCard>
+        <PanelCard title="HW-Interfaces · state">
+          {hwIfaces && hwIfaces.state_interfaces ? (hwIfaces.state_interfaces.length ? (
+            <List dense>{hwIfaces.state_interfaces.map((i) => (
+              <ListItem key={i.name} secondaryAction={<Stack direction="row" spacing={0.5}>
+                <Chip size="small" variant="outlined" color={i.is_available ? 'success' : 'default'} label={i.is_available ? 'avail' : 'n/a'} />
+                <Chip size="small" variant="outlined" color={i.is_claimed ? 'warning' : 'default'} label={i.is_claimed ? 'claimed' : 'free'} />
+              </Stack>}>
+                <ListItemText primary={i.name} primaryTypographyProps={{ sx: mono }} />
+              </ListItem>
+            ))}</List>
+          ) : <Empty>keine</Empty>) : <Empty>—</Empty>}
+        </PanelCard>
+      </Box>
+
+      <Card>
+        <CardHeader title="Timing / Jitter · controller_manager"
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+        <Divider />
+        <CardContent>
+          {Object.keys(cmDiag).length ? Object.values(cmDiag).map((s) => {
+            const d = DIAG[s.level] || ['?', 'default']
+            return (
+              <Box key={s.name} sx={{ mb: 1.5 }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip size="small" color={d[1]} label={d[0]} />
+                  <Typography sx={{ ...mono, flexGrow: 1 }}>{s.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{s.message}</Typography>
+                </Stack>
+                <Box sx={{ mt: 0.5 }}>
+                  {(s.values || []).map((v) => (
+                    <Box key={v.key} sx={{ display: 'grid', gridTemplateColumns: '230px 1fr', gap: 1, alignItems: 'baseline', py: 0.2 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{v.key}</Typography>
+                      <Typography variant="caption" sx={{ fontFamily: 'ui-monospace,Menlo,monospace', overflowWrap: 'anywhere', whiteSpace: 'normal' }}>{v.value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            )
+          }) : <Empty>controller_manager-Diagnostics (EPOS-Bringup nötig) …</Empty>}
         </CardContent>
       </Card>
     </Stack>
