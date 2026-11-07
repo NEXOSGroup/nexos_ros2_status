@@ -289,28 +289,52 @@ export function DiagnosticsPanel({ ros }) {
     return () => { try { t.unsubscribe() } catch (e) {} }
   }, [ros])
   const keys = Object.keys(map).sort()
+  const counts = { 0: 0, 1: 0, 2: 0, 3: 0 }
+  keys.forEach((k) => { counts[map[k].level] = (counts[map[k].level] || 0) + 1 })
+  const accent = { success: '#3fb950', warning: '#d29922', error: '#f85149', default: '#8b98a5' }
+
   return (
-    <PanelCard title="Diagnostics (/diagnostics)" count={keys.length}>
-      {keys.length ? (
-        <List dense>
-          {keys.map((k) => {
-            const s = map[k]; const d = DIAG[s.level] || ['?', 'default']
-            return (
-              <ListItem key={k}>
-                <Chip size="small" color={d[1]} variant="outlined" label={d[0]} sx={{ mr: 1.5 }} />
-                <ListItemText primary={s.name} primaryTypographyProps={{ sx: mono }} />
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" justifyContent="flex-end">
-                  {(s.values || []).map((v) => (
-                    <Chip key={v.key} size="small" variant="outlined"
-                      label={<span><span style={{ color: '#8b98a5' }}>{v.key}</span> {v.value}</span>} />
-                  ))}
-                </Stack>
-              </ListItem>
-            )
-          })}
-        </List>
-      ) : <Empty>Warte auf /diagnostics …</Empty>}
-    </PanelCard>
+    <Card>
+      <CardHeader title="Diagnostics (/diagnostics)"
+        titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }}
+        action={<Stack direction="row" spacing={1}>
+          {[[0, 'OK'], [1, 'WARN'], [2, 'ERROR'], [3, 'STALE']].map(([lv, lbl]) => (
+            <Chip key={lv} size="small" color={DIAG[lv][1]} variant={counts[lv] ? 'filled' : 'outlined'} label={`${counts[lv] || 0} ${lbl}`} />
+          ))}
+        </Stack>} />
+      <Divider />
+      <CardContent sx={{ p: 0, maxHeight: '72vh', overflow: 'auto' }}>
+        {keys.length ? keys.map((k) => {
+          const s = map[k]; const d = DIAG[s.level] || ['?', 'default']
+          return (
+            <Box key={k} sx={{ borderLeft: `3px solid ${accent[d[1]]}`, px: 2, py: 1.2, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip size="small" color={d[1]} label={d[0]} />
+                <Typography sx={{ ...mono, flexGrow: 1 }}>{s.name}</Typography>
+                <Typography variant="caption" color="text.secondary">{s.message}</Typography>
+              </Stack>
+              {(s.values || []).length > 0 && (
+                <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', mt: 1 }}>
+                  {(s.values || []).map((v) => {
+                    const num = parseFloat(v.value); const pct = /%/.test(v.key) && !isNaN(num)
+                    return (
+                      <Box key={v.key}>
+                        <Stack direction="row" justifyContent="space-between">
+                          <Typography variant="caption" color="text.secondary">{v.key}</Typography>
+                          <Typography variant="caption" sx={mono}>{v.value}</Typography>
+                        </Stack>
+                        {pct && <LinearProgress variant="determinate" value={Math.min(100, num)}
+                          sx={{ height: 6, borderRadius: 3, bgcolor: '#2a333d', '& .MuiLinearProgress-bar': { backgroundColor: gcolor(num, 80, 92) } }} />}
+                      </Box>
+                    )
+                  })}
+                </Box>
+              )}
+            </Box>
+          )
+        }) : <Empty>Warte auf /diagnostics …</Empty>}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -319,6 +343,8 @@ export function ControlPanel({ ros }) {
   const [controllers, setControllers] = useState(null)
   const [hw, setHw] = useState(null)
   const [joints, setJoints] = useState([])
+  const hist = useRef({})
+  const [, force] = useState(0)
   const refresh = () => {
     if (!ros) return
     const cm = '/controller_manager'
@@ -331,55 +357,85 @@ export function ControlPanel({ ros }) {
     refresh()
     if (!ros) return
     const t = new ROSLIB.Topic({ ros, name: '/joint_states', messageType: 'sensor_msgs/msg/JointState' })
-    t.subscribe((m) => setJoints((m.name || []).map((n, i) => ({
-      name: n,
-      pos: m.position && m.position[i] != null ? m.position[i].toFixed(4) : '–',
-      vel: m.velocity && m.velocity[i] != null ? m.velocity[i].toFixed(3) : '–',
-    }))))
+    t.subscribe((m) => {
+      const js = (m.name || []).map((n, i) => ({
+        name: n,
+        pos: m.position && m.position[i] != null ? m.position[i] : null,
+        vel: m.velocity && m.velocity[i] != null ? m.velocity[i] : null,
+      }))
+      setJoints(js)
+      js.forEach((j) => {
+        const arr = hist.current[j.name] || []
+        arr.push({ pos: j.pos, vel: j.vel })
+        hist.current[j.name] = arr.slice(-80)
+      })
+      force((n) => n + 1)
+    })
     return () => { try { t.unsubscribe() } catch (e) {} }
   }, [ros]) // eslint-disable-line
 
   const stColor = (s) => s === 'active' ? 'success' : s === 'inactive' ? 'warning' : 'default'
+  const fx = (v, d) => (v == null ? '–' : v.toFixed(d))
   return (
-    <Box sx={grid2}>
-      <PanelCard title="Controller" onRefresh={refresh}>
-        {controllers == null ? <Empty>„⟳" (controller_manager nötig)</Empty> :
-          controllers.length ? (
-            <List dense>{controllers.map((c) => (
-              <ListItem key={c.name} secondaryAction={<Chip size="small" variant="outlined" color={stColor(c.state)} label={c.state} />}>
-                <ListItemText primary={c.name} secondary={c.type} primaryTypographyProps={{ sx: mono }}
-                  secondaryTypographyProps={{ sx: mono, color: 'text.secondary' }} />
-              </ListItem>
-            ))}</List>
-          ) : <Empty>keine Controller</Empty>}
-      </PanelCard>
-      <PanelCard title="Hardware-Komponenten">
-        {hw == null ? <Empty>—</Empty> : hw.length ? (
-          <List dense>{hw.map((h) => {
-            const st = (h.state && h.state.label) || '?'
+    <Stack spacing={2}>
+      <Box sx={grid2}>
+        <PanelCard title="Controller" onRefresh={refresh}>
+          {controllers == null ? <Empty>„⟳" (controller_manager nötig)</Empty> :
+            controllers.length ? (
+              <List dense>{controllers.map((c) => (
+                <ListItem key={c.name} secondaryAction={<Chip size="small" variant="outlined" color={stColor(c.state)} label={c.state} />}>
+                  <ListItemText primary={c.name} secondary={c.type} primaryTypographyProps={{ sx: mono }}
+                    secondaryTypographyProps={{ sx: mono, color: 'text.secondary' }} />
+                </ListItem>
+              ))}</List>
+            ) : <Empty>keine Controller</Empty>}
+        </PanelCard>
+        <PanelCard title="Hardware-Komponenten">
+          {hw == null ? <Empty>—</Empty> : hw.length ? (
+            <List dense>{hw.map((h) => {
+              const st = (h.state && h.state.label) || '?'
+              return (
+                <ListItem key={h.name} secondaryAction={<Chip size="small" variant="outlined" color={stColor(st)} label={st} />}>
+                  <ListItemText primary={h.name} secondary={h.type} primaryTypographyProps={{ sx: mono }}
+                    secondaryTypographyProps={{ sx: mono, color: 'text.secondary' }} />
+                </ListItem>
+              )
+            })}</List>
+          ) : <Empty>keine Komponenten</Empty>}
+        </PanelCard>
+      </Box>
+
+      <Card>
+        <CardHeader title="Joints · Live-Plots (/joint_states)"
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+        <Divider />
+        <CardContent>
+          {joints.length ? joints.map((j) => {
+            const hh = hist.current[j.name] || []
             return (
-              <ListItem key={h.name} secondaryAction={<Chip size="small" variant="outlined" color={stColor(st)} label={st} />}>
-                <ListItemText primary={h.name} secondary={h.type} primaryTypographyProps={{ sx: mono }}
-                  secondaryTypographyProps={{ sx: mono, color: 'text.secondary' }} />
-              </ListItem>
+              <Box key={j.name} sx={{ mb: 2.5 }}>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                  <Typography sx={{ ...mono, flexGrow: 1 }}>{j.name}</Typography>
+                  <Chip size="small" variant="outlined" sx={{ borderColor: '#c8a34e', color: '#c8a34e' }} label={`pos ${fx(j.pos, 3)} rad`} />
+                  <Chip size="small" variant="outlined" color="info" label={`vel ${fx(j.vel, 3)} rad/s`} />
+                </Stack>
+                {hh.length > 1 ? (
+                  <LineChart height={210}
+                    margin={{ top: 16, right: 52, bottom: 20, left: 52 }}
+                    xAxis={[{ data: hh.map((_, i) => i), scaleType: 'point' }]}
+                    yAxis={[{ id: 'pos' }, { id: 'vel', position: 'right' }]}
+                    series={[
+                      { data: hh.map((x) => x.pos), label: 'pos rad', yAxisId: 'pos', color: '#c8a34e', showMark: false, curve: 'monotoneX' },
+                      { data: hh.map((x) => x.vel), label: 'vel rad/s', yAxisId: 'vel', color: '#58a6ff', showMark: false, area: true, curve: 'monotoneX' },
+                    ]}
+                    slotProps={{ legend: { direction: 'row', position: { vertical: 'top', horizontal: 'end' } } }} />
+                ) : <Empty>sammle Messwerte …</Empty>}
+              </Box>
             )
-          })}</List>
-        ) : <Empty>keine Komponenten</Empty>}
-      </PanelCard>
-      <PanelCard title="Joints (/joint_states)">
-        {joints.length ? (
-          <List dense>{joints.map((j) => (
-            <ListItem key={j.name} secondaryAction={
-              <Stack direction="row" spacing={0.5}>
-                <Chip size="small" variant="outlined" label={`pos ${j.pos}`} />
-                <Chip size="small" variant="outlined" label={`vel ${j.vel}`} />
-              </Stack>}>
-              <ListItemText primary={j.name} primaryTypographyProps={{ sx: mono }} />
-            </ListItem>
-          ))}</List>
-        ) : <Empty>Warte auf /joint_states …</Empty>}
-      </PanelCard>
-    </Box>
+          }) : <Empty>Warte auf /joint_states … (EPOS-Bringup auf dem UGV starten)</Empty>}
+        </CardContent>
+      </Card>
+    </Stack>
   )
 }
 
