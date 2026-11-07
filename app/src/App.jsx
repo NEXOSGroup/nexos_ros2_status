@@ -6,6 +6,7 @@ import {
 } from '@mui/material'
 import HistoryIcon from '@mui/icons-material/History'
 import CircleIcon from '@mui/icons-material/Circle'
+import logoLight from './assets/nexos-logo-light.png'
 import { useRos } from './ros'
 import {
   SystemPanel, NodesPanel, TopicsPanel, LifecyclePanel,
@@ -85,9 +86,13 @@ export default function App() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
         <Toolbar sx={{ gap: 1.5, flexWrap: 'wrap', py: 1 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: .5 }}>
-            <span style={{ color: '#c8a34e' }}>NEXOS</span> ros_status
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <img src={logoLight} alt="NEXOS.Group" style={{ height: 88, display: 'block' }} />
+            <Divider orientation="vertical" flexItem sx={{ my: 0.75 }} />
+            <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.secondary', letterSpacing: 1, fontSize: 15 }}>
+              ros_status
+            </Typography>
+          </Box>
 
           {/* Connection manager */}
           <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />

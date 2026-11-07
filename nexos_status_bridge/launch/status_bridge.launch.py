@@ -34,4 +34,13 @@ def generate_launch_description():
             output='screen',
             respawn=True,
         ),
+        # Remote on/off for the EPOS drive bringup (ground-station power button).
+        Node(
+            package='nexos_status_agent',
+            executable='power',
+            name='nexos_power_control',
+            output='screen',
+            respawn=True,
+            parameters=[{'unit': 'epos-bringup.service'}],
+        ),
     ])

@@ -4,9 +4,12 @@ import {
   Card, CardHeader, CardContent, List, ListItemButton, ListItem, ListItemText,
   Chip, TextField, Button, Stack, Drawer, Box, Typography, LinearProgress,
   IconButton, ToggleButton, ToggleButtonGroup, Divider, Tooltip,
+  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+  Snackbar, Alert, CircularProgress,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import CloseIcon from '@mui/icons-material/Close'
+import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew'
 import { Gauge, gaugeClasses } from '@mui/x-charts/Gauge'
 import { LineChart } from '@mui/x-charts/LineChart'
 
@@ -339,6 +342,84 @@ export function DiagnosticsPanel({ ros }) {
 }
 
 /* ---------------- ros2_control ---------------- */
+/* Remote drive on/off — switches epos-bringup.service on the UGV via
+   /nexos/epos/power (SetBool); live state from /nexos/epos/power_state (Bool). */
+function PowerCard({ ros }) {
+  const [on, setOn] = useState(null)         // null = unbekannt, sonst bool
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(null) // true=ein, false=aus, null=zu
+  const [snack, setSnack] = useState(null)      // { ok, text }
+
+  useEffect(() => {
+    if (!ros) return
+    const t = new ROSLIB.Topic({ ros, name: '/nexos/epos/power_state', messageType: 'std_msgs/msg/Bool' })
+    t.subscribe((m) => setOn(!!m.data))
+    return () => { try { t.unsubscribe() } catch (e) {} }
+  }, [ros])
+
+  const doSwitch = (data) => {
+    setConfirm(null); setBusy(true)
+    new ROSLIB.Service({ ros, name: '/nexos/epos/power', serviceType: 'std_srvs/srv/SetBool' })
+      .callService({ data },
+        (r) => { setBusy(false); setSnack({ ok: !!r.success, text: r.message || (r.success ? 'ok' : 'Fehler') }) },
+        (e) => { setBusy(false); setSnack({ ok: false, text: 'Service nicht erreichbar: ' + e }) })
+  }
+
+  const known = on !== null
+  const stChip = !known
+    ? <Chip size="small" variant="outlined" label="Status unbekannt" />
+    : <Chip size="small" color={on ? 'success' : 'default'} variant={on ? 'filled' : 'outlined'}
+        icon={<PowerSettingsNewIcon sx={{ fontSize: 14 }} />}
+        label={on ? 'EIN · Motor bestromt' : 'AUS · stromlos'} />
+
+  return (
+    <Card sx={{ borderColor: '#c8a34e55' }}>
+      <CardHeader
+        avatar={<PowerSettingsNewIcon sx={{ color: '#c8a34e' }} />}
+        title="Antrieb · Ein / Aus"
+        titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }}
+        action={stChip} sx={{ py: 1 }} />
+      <Divider />
+      <CardContent>
+        <Stack direction="row" spacing={1.5} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Button variant="contained" color="success" startIcon={<PowerSettingsNewIcon />}
+            disabled={busy || on === true} onClick={() => setConfirm(true)}>Einschalten</Button>
+          <Button variant="outlined" color="error"
+            disabled={busy || on === false} onClick={() => setConfirm(false)}>Ausschalten</Button>
+          {busy && <CircularProgress size={20} />}
+          <Box sx={{ flexGrow: 1 }} />
+          <Typography variant="caption" color="text.secondary" sx={{ ...mono }}>
+            epos-bringup.service @ UGV
+          </Typography>
+        </Stack>
+      </CardContent>
+
+      <Dialog open={confirm !== null} onClose={() => setConfirm(null)}>
+        <DialogTitle>{confirm ? 'Antrieb einschalten?' : 'Antrieb ausschalten?'}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {confirm
+              ? 'Der EPOS-Bringup wird gestartet und der Motor wird BESTROMT. Achse frei? Niemand im Gefahrenbereich?'
+              : 'Der EPOS-Bringup wird gestoppt, der Motor wird stromlos. Eine laufende Bewegung stoppt sofort.'}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirm(null)}>Abbrechen</Button>
+          <Button variant="contained" color={confirm ? 'success' : 'error'} onClick={() => doSwitch(confirm)}>
+            {confirm ? 'Jetzt einschalten' : 'Jetzt ausschalten'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar open={!!snack} autoHideDuration={6000} onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        {snack ? <Alert severity={snack.ok ? 'success' : 'error'} variant="filled"
+          onClose={() => setSnack(null)}>{snack.text}</Alert> : undefined}
+      </Snackbar>
+    </Card>
+  )
+}
+
 export function ControlPanel({ ros }) {
   const [controllers, setControllers] = useState(null)
   const [hw, setHw] = useState(null)
@@ -350,16 +431,29 @@ export function ControlPanel({ ros }) {
   const refresh = () => {
     if (!ros) return
     const cm = '/controller_manager'
-    new ROSLIB.Service({ ros, name: cm + '/list_controllers', serviceType: 'controller_manager_msgs/srv/ListControllers' })
-      .callService({}, (r) => setControllers(r.controller || []), () => setControllers([]))
-    new ROSLIB.Service({ ros, name: cm + '/list_hardware_components', serviceType: 'controller_manager_msgs/srv/ListHardwareComponents' })
-      .callService({}, (r) => setHw(r.component || []), () => setHw([]))
-    new ROSLIB.Service({ ros, name: cm + '/list_hardware_interfaces', serviceType: 'controller_manager_msgs/srv/ListHardwareInterfaces' })
-      .callService({}, (r) => setHwIfaces(r), () => setHwIfaces(null))
+    const callCm = () => {
+      new ROSLIB.Service({ ros, name: cm + '/list_controllers', serviceType: 'controller_manager_msgs/srv/ListControllers' })
+        .callService({}, (r) => setControllers(r.controller || []), () => setControllers([]))
+      new ROSLIB.Service({ ros, name: cm + '/list_hardware_components', serviceType: 'controller_manager_msgs/srv/ListHardwareComponents' })
+        .callService({}, (r) => setHw(r.component || []), () => setHw([]))
+      new ROSLIB.Service({ ros, name: cm + '/list_hardware_interfaces', serviceType: 'controller_manager_msgs/srv/ListHardwareInterfaces' })
+        .callService({}, (r) => setHwIfaces(r), () => setHwIfaces(null))
+    }
+    // Only poke the controller_manager if it actually exists — otherwise the
+    // calls fail and rosbridge logs ERRORs that wrongly turn the health red
+    // while the drive is simply switched off.
+    new ROSLIB.Service({ ros, name: '/rosapi/services', serviceType: 'rosapi_msgs/srv/Services' })
+      .callService({}, (r) => {
+        if ((r.services || []).includes(cm + '/list_controllers')) callCm()
+        else { setControllers([]); setHw([]); setHwIfaces(null) }
+      }, () => callCm())
   }
   useEffect(() => {
     refresh()
     if (!ros) return
+    // Keep controller/hardware lists live: they otherwise only refresh on mount,
+    // so they'd stay empty after the drive is switched on via the power button.
+    const ri = setInterval(refresh, 4000)
     const t = new ROSLIB.Topic({ ros, name: '/joint_states', messageType: 'sensor_msgs/msg/JointState' })
     t.subscribe((m) => {
       const js = (m.name || []).map((n, i) => ({
@@ -381,13 +475,14 @@ export function ControlPanel({ ros }) {
       ;(m.status || []).forEach((s) => { if ((s.name || '').includes('controller_manager')) next[s.name] = s })
       return next
     }))
-    return () => { try { t.unsubscribe() } catch (e) {}; try { td.unsubscribe() } catch (e) {} }
+    return () => { clearInterval(ri); try { t.unsubscribe() } catch (e) {}; try { td.unsubscribe() } catch (e) {} }
   }, [ros]) // eslint-disable-line
 
   const stColor = (s) => s === 'active' ? 'success' : s === 'inactive' ? 'warning' : 'default'
   const fx = (v, d) => (v == null ? '–' : v.toFixed(d))
   return (
     <Stack spacing={2}>
+      <PowerCard ros={ros} />
       <Box sx={grid2}>
         <PanelCard title="Controller" onRefresh={refresh}>
           {controllers == null ? <Empty>„⟳" (controller_manager nötig)</Empty> :

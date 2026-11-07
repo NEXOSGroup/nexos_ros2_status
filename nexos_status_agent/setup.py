@@ -20,6 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "agent = nexos_status_agent.agent:main",
+            "power = nexos_status_agent.power:main",
         ],
     },
 )
