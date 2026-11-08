@@ -770,7 +770,7 @@ function OdinTrackCard({ track, diag, joint }) {
 
 // Joystick-Visualisierung aus /joy (axes=[fwd, -turn])
 function OdinJoyCard({ joy }) {
-  const fwd = joy?.axes?.[0] ?? 0        // +vor / -zurück
+  const fwd = joy ? -(joy.axes?.[0] ?? 0) : 0   // Stick vor = positiv (Hardware liefert vor = negativ)
   const turn = joy ? -(joy.axes?.[1] ?? 0) : 0  // axes[1] = -turn → turn = -axes[1]
   const cx = 60 + Math.max(-1, Math.min(1, turn)) * 48
   const cy = 60 - Math.max(-1, Math.min(1, fwd)) * 48
