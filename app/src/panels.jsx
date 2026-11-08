@@ -12,6 +12,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew'
 import { Gauge, gaugeClasses } from '@mui/x-charts/Gauge'
 import { LineChart } from '@mui/x-charts/LineChart'
+import { SparkLineChart } from '@mui/x-charts/SparkLineChart'
 
 const grid2 = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))' }
 const LVL = { 10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL' }
@@ -808,6 +809,26 @@ function OdinJoyCard({ joy }) {
   )
 }
 
+// Kompakte MUI-Sparkline mit Fläche + Live-Wert (Drehzahl / Strom je Kette)
+function SparkTile({ label, value, unit, color, data }) {
+  const ok = data.length > 1
+  return (
+    <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: '#0e1116', border: '1px solid', borderColor: 'divider' }}>
+      <Stack direction="row" alignItems="baseline" justifyContent="space-between" sx={{ mb: 0.5 }}>
+        <Typography variant="caption" color="text.secondary">{label}</Typography>
+        <Typography sx={{ ...mono, fontSize: 15, fontWeight: 700, color }}>
+          {value}{value !== '–' && unit ? <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 0.4 }}>{unit}</Typography> : null}
+        </Typography>
+      </Stack>
+      {ok ? (
+        <SparkLineChart data={data} height={58} showHighlight showTooltip
+          color={color} curve="monotoneX"
+          sx={{ [`& .MuiLineElement-root`]: { strokeWidth: 2 } }} />
+      ) : <Typography variant="caption" color="text.secondary">sammle Messwerte …</Typography>}
+    </Box>
+  )
+}
+
 export function OdinPanel({ ros }) {
   const [diagMap, setDiagMap] = useState({})
   const [joints, setJoints] = useState({})
@@ -877,35 +898,31 @@ export function OdinPanel({ ros }) {
       </Box>
 
       <Card>
-        <CardHeader title="Ketten · Live-Plots (Drehzahl & Strom, /odin/joint_states)"
+        <CardHeader title="Ketten · Live-Verlauf (/odin/joint_states)"
           titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
         <Divider />
         <CardContent>
-          {ODIN_TRACKS.some((t) => (hist.current[t.key] || []).length > 1) ? ODIN_TRACKS.map((t) => {
-            const hh = hist.current[t.key] || []
-            return (
-              <Box key={t.key} sx={{ mb: 2.5 }}>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                  <Typography sx={{ ...mono, flexGrow: 1 }}>{t.key}</Typography>
-                  <Chip size="small" variant="outlined" sx={{ borderColor: t.color, color: t.color }}
-                    label={`vel ${fnum(joints[t.key]?.vel, 3)} rad/s`} />
-                  <Chip size="small" variant="outlined" color="warning"
-                    label={`I ${fnum(joints[t.key]?.eff, 2)} A`} />
-                </Stack>
-                {hh.length > 1 ? (
-                  <LineChart height={200}
-                    margin={{ top: 16, right: 52, bottom: 20, left: 52 }}
-                    xAxis={[{ data: hh.map((_, i) => i), scaleType: 'point' }]}
-                    yAxis={[{ id: 'vel' }, { id: 'cur', position: 'right' }]}
-                    series={[
-                      { data: hh.map((x) => x.vel), label: 'vel rad/s', yAxisId: 'vel', color: t.color, showMark: false, curve: 'monotoneX' },
-                      { data: hh.map((x) => x.eff), label: 'Strom A', yAxisId: 'cur', color: '#d29922', showMark: false, area: true, curve: 'monotoneX' },
-                    ]}
-                    slotProps={{ legend: { direction: 'row', position: { vertical: 'top', horizontal: 'end' } } }} />
-                ) : <Empty>sammle Messwerte …</Empty>}
-              </Box>
-            )
-          }) : <Empty>Warte auf /odin/joint_states … (odin-rc-drive auf ODIN starten)</Empty>}
+          {ODIN_TRACKS.some((t) => (hist.current[t.key] || []).length > 1) ? (
+            <Box sx={grid2}>
+              {ODIN_TRACKS.map((t) => {
+                const hh = hist.current[t.key] || []
+                return (
+                  <Box key={t.key}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: t.color }} />
+                      <Typography sx={mono}>{t.key}</Typography>
+                    </Stack>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                      <SparkTile label="Drehzahl" unit="rad/s" color={t.color}
+                        value={fnum(joints[t.key]?.vel, 2)} data={hh.map((x) => x.vel ?? 0)} />
+                      <SparkTile label="Strom" unit="A" color="#d29922"
+                        value={fnum(joints[t.key]?.eff, 2)} data={hh.map((x) => x.eff ?? 0)} />
+                    </Box>
+                  </Box>
+                )
+              })}
+            </Box>
+          ) : <Empty>Warte auf /odin/joint_states … (odin-rc-drive auf ODIN starten)</Empty>}
         </CardContent>
       </Card>
 
