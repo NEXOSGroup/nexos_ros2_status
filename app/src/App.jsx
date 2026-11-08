@@ -10,11 +10,12 @@ import logoLight from './assets/nexos-logo-light.png'
 import { useRos } from './ros'
 import {
   SystemPanel, NodesPanel, TopicsPanel, LifecyclePanel,
-  DiagnosticsPanel, ControlPanel, LogsPanel,
+  DiagnosticsPanel, ControlPanel, OdinPanel, LogsPanel,
 } from './panels'
 
 const TABS = [
   ['System', SystemPanel],
+  ['ODIN', OdinPanel],
   ['Nodes', NodesPanel],
   ['Topics', TopicsPanel],
   ['Lifecycle', LifecyclePanel],
