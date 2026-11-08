@@ -601,6 +601,319 @@ export function ControlPanel({ ros }) {
   )
 }
 
+/* ---------------- ODIN (NEXOS.Defence UGV) ---------------- *
+   Read-only Live-Telemetrie des realen ODIN-UGV. ODIN publisht Standard-ROS-
+   Typen vom Telemetrie-Node: /odin/joint_states (JointState: pos rad, vel rad/s,
+   effort A), /diagnostics (zwei Drive-Status "ODIN drive: track_*" + ein Funk-
+   Status "ODIN radio: …") und /joy. Kein controller_manager — eigener Tab, der
+   dem Muster von ControlPanel/SystemPanel folgt. Keine Steuerung, nur Anzeige. */
+
+const ODIN_TRACKS = [
+  { key: 'track_left', label: 'Kette links', diag: 'track_left', color: '#c8a34e' },
+  { key: 'track_right', label: 'Kette rechts', diag: 'track_right', color: '#58a6ff' },
+]
+
+// KeyValue-Helfer für diagnostic_msgs/KeyValue-Listen
+const dval = (status, key) => {
+  const v = (status?.values || []).find((x) => x.key === key)
+  return v ? v.value : undefined
+}
+const dnum = (status, key) => {
+  const v = dval(status, key)
+  const n = v == null ? NaN : parseFloat(v)
+  return isNaN(n) ? NaN : n
+}
+const dhex = (status, key) => {
+  const v = dval(status, key)
+  if (v == null) return NaN
+  const n = parseInt(String(v).replace(/^0x/i, ''), 16)
+  return isNaN(n) ? NaN : n
+}
+const truthy = (v) => /^(1|true|yes|on|ok|ja)$/i.test(String(v ?? '').trim())
+
+// CiA-402 Statusword → Betriebszustand (herstellerneutral, EPOS4 = CiA 402)
+function decodeStatusword(sw) {
+  if (isNaN(sw)) return { label: '—', color: 'default' }
+  if ((sw & 0x4f) === 0x08) return { label: 'FAULT', color: 'error' }
+  if ((sw & 0x4f) === 0x0f) return { label: 'Fault-Reaktion', color: 'error' }
+  if ((sw & 0x6f) === 0x27) return { label: 'Operation enabled', color: 'success' }
+  if ((sw & 0x6f) === 0x07) return { label: 'Quick-Stop aktiv', color: 'warning' }
+  if ((sw & 0x6f) === 0x23) return { label: 'Switched on', color: 'warning' }
+  if ((sw & 0x6f) === 0x21) return { label: 'Ready to switch on', color: 'default' }
+  if ((sw & 0x4f) === 0x40) return { label: 'Switch-on disabled', color: 'default' }
+  if ((sw & 0x4f) === 0x00) return { label: 'Not ready', color: 'default' }
+  return { label: '0x' + (sw & 0xffff).toString(16).padStart(4, '0'), color: 'default' }
+}
+
+function OdinMetric({ label, value, unit, color, hint }) {
+  return (
+    <Box sx={{ px: 1.5, py: 1, borderRadius: 1.5, bgcolor: '#0e1116', border: '1px solid', borderColor: 'divider' }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{label}</Typography>
+      <Typography sx={{ ...mono, fontSize: 18, fontWeight: 700, color: color || 'text.primary', lineHeight: 1.3 }}>
+        {value}{value !== '–' && unit ? <Typography component="span" sx={{ fontSize: 12, color: 'text.secondary', ml: 0.5 }}>{unit}</Typography> : null}
+      </Typography>
+      {hint && <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10.5, display: 'block' }}>{hint}</Typography>}
+    </Box>
+  )
+}
+
+const fnum = (v, d = 0) => (v == null || isNaN(v) ? '–' : v.toFixed(d))
+
+// Funk-Panel (NBB nano-minor): E-Stop, Link, Modus, Knöpfe + Rohbytes
+function OdinRadioCard({ diag, joy }) {
+  const level = diag ? diag.level : null
+  const d = DIAG[level] ?? ['—', 'default']
+  const estopOk = diag ? truthy(dval(diag, 'e-stop ok')) : (joy ? joy.buttons?.[0] === 1 : null)
+  const linkAge = dnum(diag, 'link age [s]')
+  const mode = dval(diag, 'mode')
+  const white = diag ? truthy(dval(diag, 'white button')) : (joy ? joy.buttons?.[3] === 1 : null)
+  const reset = diag ? truthy(dval(diag, 'RESET (SW08)')) : (joy ? joy.buttons?.[1] === 1 : null)
+  const raw = [
+    ['byte0', dval(diag, 'byte0')], ['byte1', dval(diag, 'byte1')],
+    ['fwd raw', dval(diag, 'fwd raw')], ['turn raw', dval(diag, 'turn raw')],
+  ]
+  return (
+    <Card>
+      <CardHeader title="Funk · NBB nano-minor"
+        titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }}
+        action={<Chip size="small" color={d[1]} variant={level ? 'filled' : 'outlined'} label={level != null ? d[0] : '—'} />} />
+      <Divider />
+      <CardContent>
+        {!diag && joy == null ? <Empty>Warte auf Funk-Status …</Empty> : (
+          <Stack spacing={1.5}>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+              <Chip color={estopOk === null ? 'default' : estopOk ? 'success' : 'error'}
+                variant={estopOk ? 'filled' : 'outlined'}
+                label={estopOk === null ? 'E-Stop ?' : estopOk ? 'E-STOP OK' : 'E-STOP AUSGELÖST'} />
+              <Chip color={level === 0 ? 'success' : level === 1 ? 'warning' : level === 2 ? 'error' : 'default'}
+                variant="outlined"
+                label={`Funk ${isNaN(linkAge) ? '—' : 'Link-Age ' + linkAge.toFixed(2) + ' s'}`} />
+              {mode && <Chip variant="outlined" sx={{ borderColor: '#c8a34e', color: '#c8a34e' }}
+                label={`Modus: ${mode}`} />}
+              {white != null && <Chip variant={white ? 'filled' : 'outlined'} color={white ? 'info' : 'default'}
+                label="weißer Knopf" />}
+              {reset != null && <Chip variant={reset ? 'filled' : 'outlined'} color={reset ? 'warning' : 'default'}
+                label="RESET (SW08)" />}
+            </Stack>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 1 }}>
+              {raw.map(([k, v]) => <OdinMetric key={k} label={k} value={v ?? '–'} />)}
+            </Box>
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Antriebs-Status einer Kette (ein Drive-Diagnostic + passender Joint)
+function OdinTrackCard({ track, diag, joint }) {
+  const sw = dhex(diag, 'statusword')
+  const st = decodeStatusword(sw)
+  const level = diag ? diag.level : null
+  const d = DIAG[level] ?? ['—', 'default']
+  const errCode = dhex(diag, 'error code')
+  const errReg = dhex(diag, 'error register')
+  const hasErr = (!isNaN(errCode) && errCode !== 0) || (!isNaN(errReg) && errReg !== 0)
+  const currentA = joint?.eff != null ? joint.eff : (isNaN(dnum(diag, 'current avg [mA]')) ? null : dnum(diag, 'current avg [mA]') / 1000)
+  const rows = [
+    ['Betriebsart', dval(diag, 'mode display')],
+    ['Statusword', !isNaN(sw) ? '0x' + (sw & 0xffff).toString(16).padStart(4, '0') : '–'],
+    ['Error code', !isNaN(errCode) ? '0x' + errCode.toString(16).padStart(4, '0') : '–'],
+    ['Error register', !isNaN(errReg) ? '0x' + errReg.toString(16).padStart(2, '0') : '–'],
+    ['Moment', dval(diag, 'torque [1/1000 rated]') != null ? dval(diag, 'torque [1/1000 rated]') + ' ‰ rated' : '–'],
+    ['Position', dval(diag, 'position [inc]') != null ? dval(diag, 'position [inc]') + ' inc' : '–'],
+    ['Digital-Eingänge', dval(diag, 'digital inputs') ?? '–'],
+  ]
+  return (
+    <Card sx={{ borderColor: st.color === 'error' ? '#f8514955' : undefined }}>
+      <CardHeader
+        title={track.label}
+        titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }}
+        action={<Stack direction="row" spacing={0.5}>
+          <Chip size="small" color={st.color} variant={st.color === 'success' ? 'filled' : 'outlined'} label={st.label} />
+          {level != null && <Chip size="small" color={d[1]} variant="outlined" label={d[0]} />}
+        </Stack>}
+        sx={{ py: 1 }} />
+      <Divider />
+      <CardContent>
+        {!diag && !joint ? <Empty>Warte auf Antriebs-Daten … (odin-rc-drive)</Empty> : (
+          <Stack spacing={1.5}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(118px,1fr))', gap: 1 }}>
+              <OdinMetric label="Drehzahl" value={fnum(dnum(diag, 'velocity [rpm]'), 0)} unit="rpm" color={track.color} />
+              <OdinMetric label="Ø Drehzahl" value={fnum(dnum(diag, 'velocity avg [rpm]'), 0)} unit="rpm" />
+              <OdinMetric label="Strom" value={currentA == null ? '–' : currentA.toFixed(2)} unit="A"
+                color={currentA != null && Math.abs(currentA) > 5 ? '#d29922' : undefined} />
+              <OdinMetric label="Spannung" value={fnum(dnum(diag, 'supply [V]'), 1)} unit="V" />
+              <OdinMetric label="Temperatur" value={dval(diag, 'temp 0x3201:1 [raw]') ?? '–'} unit="raw"
+                hint="Rohwert · °C unbestätigt" color="#58a6ff" />
+              <OdinMetric label="Pos (Kette)" value={joint?.pos != null ? joint.pos.toFixed(3) : '–'} unit="rad" />
+            </Box>
+            {hasErr && (
+              <Alert severity="error" variant="outlined" sx={{ py: 0 }}>
+                Fehler aktiv — error code 0x{isNaN(errCode) ? '?' : errCode.toString(16)} / register 0x{isNaN(errReg) ? '?' : errReg.toString(16)}
+              </Alert>
+            )}
+            <Box>
+              {rows.map(([k, v]) => (
+                <Box key={k} sx={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 1, py: 0.25 }}>
+                  <Typography variant="caption" color="text.secondary">{k}</Typography>
+                  <Typography variant="caption" sx={mono}>{v}</Typography>
+                </Box>
+              ))}
+            </Box>
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Joystick-Visualisierung aus /joy (axes=[fwd, -turn])
+function OdinJoyCard({ joy }) {
+  const fwd = joy?.axes?.[0] ?? 0        // +vor / -zurück
+  const turn = joy ? -(joy.axes?.[1] ?? 0) : 0  // axes[1] = -turn → turn = -axes[1]
+  const cx = 60 + Math.max(-1, Math.min(1, turn)) * 48
+  const cy = 60 - Math.max(-1, Math.min(1, fwd)) * 48
+  const btn = [['E-Stop', 0, 'success'], ['Reset', 1, 'warning'], ['Turtle', 2, 'info'], ['Weiß', 3, 'info']]
+  return (
+    <Card>
+      <CardHeader title="Joystick · /joy"
+        titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+      <Divider />
+      <CardContent>
+        {!joy ? <Empty>Warte auf /joy …</Empty> : (
+          <Stack direction="row" spacing={2} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
+            <Box component="svg" viewBox="0 0 120 120" sx={{ width: 120, height: 120, flexShrink: 0 }}>
+              <rect x="4" y="4" width="112" height="112" rx="10" fill="#0e1116" stroke="#2a333d" />
+              <line x1="60" y1="8" x2="60" y2="112" stroke="#2a333d" strokeWidth="1" />
+              <line x1="8" y1="60" x2="112" y2="60" stroke="#2a333d" strokeWidth="1" />
+              <circle cx={cx} cy={cy} r="9" fill="#c8a34e" />
+            </Box>
+            <Stack spacing={1}>
+              <Stack direction="row" spacing={1}>
+                <Chip size="small" variant="outlined" sx={{ borderColor: '#c8a34e', color: '#c8a34e' }} label={`vor/zurück ${fwd.toFixed(2)}`} />
+                <Chip size="small" variant="outlined" color="info" label={`drehen ${turn.toFixed(2)}`} />
+              </Stack>
+              <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                {btn.map(([lbl, i, col]) => {
+                  const on = joy.buttons?.[i] === 1
+                  return <Chip key={lbl} size="small" color={on ? col : 'default'} variant={on ? 'filled' : 'outlined'} label={lbl} />
+                })}
+              </Stack>
+            </Stack>
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function OdinPanel({ ros }) {
+  const [diagMap, setDiagMap] = useState({})
+  const [joints, setJoints] = useState({})
+  const [joy, setJoy] = useState(null)
+  const hist = useRef({})
+  const [, force] = useState(0)
+
+  useEffect(() => {
+    if (!ros) return
+    const td = new ROSLIB.Topic({ ros, name: '/diagnostics', messageType: 'diagnostic_msgs/msg/DiagnosticArray' })
+    td.subscribe((m) => setDiagMap((prev) => {
+      const next = { ...prev }
+      ;(m.status || []).forEach((s) => { if (/odin/i.test(s.name || '')) next[s.name] = s })
+      return next
+    }))
+    const tj = new ROSLIB.Topic({ ros, name: '/odin/joint_states', messageType: 'sensor_msgs/msg/JointState' })
+    tj.subscribe((m) => {
+      const next = {}
+      ;(m.name || []).forEach((n, i) => {
+        next[n] = {
+          pos: m.position && m.position[i] != null ? m.position[i] : null,
+          vel: m.velocity && m.velocity[i] != null ? m.velocity[i] : null,
+          eff: m.effort && m.effort[i] != null ? m.effort[i] : null,
+        }
+        const arr = hist.current[n] || []
+        arr.push({ vel: next[n].vel, eff: next[n].eff })
+        hist.current[n] = arr.slice(-80)
+      })
+      setJoints(next)
+      force((x) => x + 1)
+    })
+    const ty = new ROSLIB.Topic({ ros, name: '/joy', messageType: 'sensor_msgs/msg/Joy' })
+    ty.subscribe((m) => setJoy({ axes: m.axes || [], buttons: m.buttons || [] }))
+    return () => {
+      try { td.unsubscribe() } catch (e) {}
+      try { tj.unsubscribe() } catch (e) {}
+      try { ty.unsubscribe() } catch (e) {}
+    }
+  }, [ros])
+
+  const findDiag = (sub) => Object.values(diagMap).find((s) => /drive/i.test(s.name) && s.name.includes(sub))
+  const radio = Object.values(diagMap).find((s) => /radio/i.test(s.name))
+  const seen = Object.keys(diagMap).length > 0 || Object.keys(joints).length > 0 || joy != null
+
+  return (
+    <Stack spacing={2}>
+      {!seen && (
+        <Card>
+          <CardContent>
+            <Empty>
+              Keine ODIN-Telemetrie. Oben im Verbindungs-Manager zu ODINs Bridge verbinden
+              (<Box component="span" sx={mono}>ws://&lt;odin-ip&gt;:9090</Box>). Erwartet werden
+              <Box component="span" sx={mono}> /odin/joint_states</Box>,
+              <Box component="span" sx={mono}> /diagnostics</Box> (ODIN-Einträge) und
+              <Box component="span" sx={mono}> /joy</Box>.
+            </Empty>
+          </CardContent>
+        </Card>
+      )}
+
+      <OdinRadioCard diag={radio} joy={joy} />
+
+      <Box sx={grid2}>
+        {ODIN_TRACKS.map((t) => (
+          <OdinTrackCard key={t.key} track={t} diag={findDiag(t.diag)} joint={joints[t.key]} />
+        ))}
+      </Box>
+
+      <Card>
+        <CardHeader title="Ketten · Live-Plots (Drehzahl & Strom, /odin/joint_states)"
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+        <Divider />
+        <CardContent>
+          {ODIN_TRACKS.some((t) => (hist.current[t.key] || []).length > 1) ? ODIN_TRACKS.map((t) => {
+            const hh = hist.current[t.key] || []
+            return (
+              <Box key={t.key} sx={{ mb: 2.5 }}>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                  <Typography sx={{ ...mono, flexGrow: 1 }}>{t.key}</Typography>
+                  <Chip size="small" variant="outlined" sx={{ borderColor: t.color, color: t.color }}
+                    label={`vel ${fnum(joints[t.key]?.vel, 3)} rad/s`} />
+                  <Chip size="small" variant="outlined" color="warning"
+                    label={`I ${fnum(joints[t.key]?.eff, 2)} A`} />
+                </Stack>
+                {hh.length > 1 ? (
+                  <LineChart height={200}
+                    margin={{ top: 16, right: 52, bottom: 20, left: 52 }}
+                    xAxis={[{ data: hh.map((_, i) => i), scaleType: 'point' }]}
+                    yAxis={[{ id: 'vel' }, { id: 'cur', position: 'right' }]}
+                    series={[
+                      { data: hh.map((x) => x.vel), label: 'vel rad/s', yAxisId: 'vel', color: t.color, showMark: false, curve: 'monotoneX' },
+                      { data: hh.map((x) => x.eff), label: 'Strom A', yAxisId: 'cur', color: '#d29922', showMark: false, area: true, curve: 'monotoneX' },
+                    ]}
+                    slotProps={{ legend: { direction: 'row', position: { vertical: 'top', horizontal: 'end' } } }} />
+                ) : <Empty>sammle Messwerte …</Empty>}
+              </Box>
+            )
+          }) : <Empty>Warte auf /odin/joint_states … (odin-rc-drive auf ODIN starten)</Empty>}
+        </CardContent>
+      </Card>
+
+      <OdinJoyCard joy={joy} />
+    </Stack>
+  )
+}
+
 /* ---------------- Logs ---------------- */
 export function LogsPanel({ ros }) {
   const [logs, setLogs] = useState([])
