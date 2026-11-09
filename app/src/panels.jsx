@@ -937,7 +937,7 @@ export function OdinPanel({ ros }) {
    zu einem online UGV zu verbinden. Nutzt den bestehenden Connection-Manager
    (useRos.connect) — ein UGV ist nur eine gemeldete ws_url. Funktioniert auch
    ohne aktive ROS-Verbindung (deshalb useRos statt ros-Prop). */
-const DEFAULT_REGISTRY = import.meta.env.VITE_REGISTRY_URL || 'http://localhost:8090'
+const DEFAULT_REGISTRY = import.meta.env.VITE_REGISTRY_URL || 'https://fleet.alps-robotics.com'
 
 export function FleetPanel() {
   const { url, status, connect } = useRos()
