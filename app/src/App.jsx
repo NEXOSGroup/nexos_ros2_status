@@ -10,10 +10,15 @@ import logoLight from './assets/nexos-logo-light.png'
 import { useRos } from './ros'
 import {
   SystemPanel, NodesPanel, TopicsPanel, LifecyclePanel,
-  DiagnosticsPanel, ControlPanel, OdinPanel, LogsPanel,
+  DiagnosticsPanel, ControlPanel, OdinPanel, FleetPanel, LogsPanel,
 } from './panels'
 
+// Panels, die auch ohne aktive ROS-Verbindung sinnvoll sind (hier wählt man
+// den Roboter erst aus).
+const OFFLINE_OK = new Set(['Flotte'])
+
 const TABS = [
+  ['Flotte', FleetPanel],
   ['System', SystemPanel],
   ['ODIN', OdinPanel],
   ['Nodes', NodesPanel],
@@ -82,6 +87,7 @@ export default function App() {
   else if (stats.warn > 0 || stats.diagWarn > 0) health = { c: 'warning', t: 'WARN' }
 
   const Panel = TABS[tab][1]
+  const showOffline = OFFLINE_OK.has(TABS[tab][0])
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -135,7 +141,7 @@ export default function App() {
       </AppBar>
 
       <Box sx={{ p: 2, maxWidth: 1360, mx: 'auto' }}>
-        {connected ? <Panel ros={ros} /> : (
+        {connected || showOffline ? <Panel ros={ros} /> : (
           <Typography sx={{ p: 4, color: 'text.secondary', textAlign: 'center' }}>
             Nicht verbunden — Bridge-URL eingeben und „Verbinden" klicken.
           </Typography>

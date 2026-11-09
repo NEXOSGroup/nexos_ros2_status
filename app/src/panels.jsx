@@ -13,6 +13,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew'
 import { Gauge, gaugeClasses } from '@mui/x-charts/Gauge'
 import { LineChart } from '@mui/x-charts/LineChart'
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart'
+import { useRos } from './ros'
 
 const grid2 = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))' }
 const LVL = { 10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL' }
@@ -927,6 +928,92 @@ export function OdinPanel({ ros }) {
       </Card>
 
       <OdinJoyCard joy={joy} />
+    </Stack>
+  )
+}
+
+/* ---------------- Flotte (UGV-Register) ---------------- *
+   Liest die Online-Liste der fleet-registry (GET /ugvs) und erlaubt, per Klick
+   zu einem online UGV zu verbinden. Nutzt den bestehenden Connection-Manager
+   (useRos.connect) — ein UGV ist nur eine gemeldete ws_url. Funktioniert auch
+   ohne aktive ROS-Verbindung (deshalb useRos statt ros-Prop). */
+const DEFAULT_REGISTRY = import.meta.env.VITE_REGISTRY_URL || 'http://localhost:8090'
+
+export function FleetPanel() {
+  const { url, status, connect } = useRos()
+  const [registry, setRegistry] = useState(() => localStorage.getItem('fleet_registry_url') || DEFAULT_REGISTRY)
+  const [ugvs, setUgvs] = useState(null) // null = noch nie geladen
+  const [err, setErr] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    const base = registry.replace(/\/+$/, '')
+    const poll = async () => {
+      try {
+        const r = await fetch(base + '/ugvs', { cache: 'no-store' })
+        if (!r.ok) throw new Error('HTTP ' + r.status)
+        const data = await r.json()
+        if (alive) { setUgvs(Array.isArray(data) ? data : []); setErr(null) }
+      } catch (e) {
+        if (alive) setErr(String(e.message || e))
+      }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { alive = false; clearInterval(id) }
+  }, [registry])
+
+  const saveRegistry = (v) => { setRegistry(v); try { localStorage.setItem('fleet_registry_url', v) } catch (e) {} }
+  const online = (ugvs || []).filter((u) => u.online).length
+
+  return (
+    <Stack spacing={2}>
+      <Card>
+        <CardHeader title="Flotte · Registry"
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }}
+          action={<Chip size="small" color={online ? 'success' : 'default'} variant="outlined" label={`${online} online`} />} />
+        <Divider />
+        <CardContent>
+          <Stack direction="row" spacing={1} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
+            <TextField size="small" label="Registry-URL" value={registry}
+              onChange={(e) => saveRegistry(e.target.value)} sx={{ width: 'min(420px, 100%)' }} />
+            {err && <Chip size="small" color="error" variant="outlined" label="Registry nicht erreichbar" />}
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {ugvs == null ? <Empty>Lade Flotte …</Empty> :
+        ugvs.length === 0 ? <Empty>Keine UGVs angemeldet — Registrar auf einem UGV starten.</Empty> : (
+          <Box sx={grid2}>
+            {ugvs.map((u) => {
+              const isCurrent = status === 'connected' && url === u.ws_url
+              return (
+                <Card key={u.id} sx={{ borderColor: u.online ? '#3fb95055' : undefined }}>
+                  <CardContent>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: u.online ? '#3fb950' : '#8b98a5' }} />
+                      <Typography sx={{ flexGrow: 1, fontWeight: 600 }}>{u.name}</Typography>
+                      <Chip size="small" color={u.online ? 'success' : 'default'} variant={u.online ? 'filled' : 'outlined'}
+                        label={u.online ? 'online' : 'offline'} />
+                    </Stack>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '92px 1fr', gap: 0.4, mb: 1.5 }}>
+                      <Typography variant="caption" color="text.secondary">Adresse</Typography>
+                      <Typography variant="caption" sx={mono}>{u.ws_url}</Typography>
+                      <Typography variant="caption" color="text.secondary">Status</Typography>
+                      <Typography variant="caption" sx={mono}>{u.status}</Typography>
+                      <Typography variant="caption" color="text.secondary">zuletzt</Typography>
+                      <Typography variant="caption" sx={mono}>{u.age_s}s</Typography>
+                    </Box>
+                    <Button size="small" variant={isCurrent ? 'outlined' : 'contained'}
+                      disabled={!u.online || isCurrent} onClick={() => connect(u.ws_url)}>
+                      {isCurrent ? 'verbunden' : 'Verbinden'}
+                    </Button>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </Box>
+        )}
     </Stack>
   )
 }

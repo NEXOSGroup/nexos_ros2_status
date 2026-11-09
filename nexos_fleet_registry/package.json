@@ -1,0 +1,15 @@
+{
+  "name": "nexos-fleet-registry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NEXOS fleet registry — UGVs melden sich per Heartbeat an, Clients lesen die Online-Liste (Teil von ros_status)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0"
+}
