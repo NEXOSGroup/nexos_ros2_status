@@ -21,6 +21,8 @@ export function RosProvider({ children }) {
   const [ugvs, setUgvs] = useState(null) // null = noch nie geladen
   const [fleetError, setFleetError] = useState(null)
   const [autoConnect, setAutoConnectState] = useState(() => localStorage.getItem('fleet_autoconnect') !== '0')
+  // Welcher UGV wird im Telemetrie-Tab angezeigt (liest dessen https-Snapshots).
+  const [selectedUgv, setSelectedUgvState] = useState(() => localStorage.getItem('fleet_selected_ugv') || null)
 
   const connect = useCallback((target) => {
     const u = target || url
@@ -54,6 +56,11 @@ export function RosProvider({ children }) {
   const setAutoConnect = useCallback((v) => {
     setAutoConnectState(v)
     try { localStorage.setItem('fleet_autoconnect', v ? '1' : '0') } catch (e) {}
+  }, [])
+
+  const setSelectedUgv = useCallback((id) => {
+    setSelectedUgvState(id)
+    try { if (id) localStorage.setItem('fleet_selected_ugv', id); else localStorage.removeItem('fleet_selected_ugv') } catch (e) {}
   }, [])
 
   // auto-connect to the last/default endpoint on first load
@@ -90,10 +97,21 @@ export function RosProvider({ children }) {
     connect(target.ws_url)
   }, [autoConnect, status, ugvs, url, connect])
 
+  // Auto-Auswahl fuer den Telemetrie-Tab: wenn nichts (mehr) gewaehlt ist, das
+  // erste online gemeldete UGV nehmen, sonst das erste in der Liste.
+  useEffect(() => {
+    const list = ugvs || []
+    if (list.length === 0) return
+    if (selectedUgv && list.some((u) => u.id === selectedUgv)) return
+    const pick = list.find((u) => u.online) || list[0]
+    if (pick) setSelectedUgvState(pick.id)
+  }, [ugvs, selectedUgv])
+
   return (
     <RosCtx.Provider value={{
       ros, status, url, setUrl, recent, connect, disconnect,
       registry, setRegistry, ugvs, fleetError, autoConnect, setAutoConnect,
+      selectedUgv, setSelectedUgv,
     }}>
       {children}
     </RosCtx.Provider>

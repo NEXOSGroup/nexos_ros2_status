@@ -10,15 +10,16 @@ import logoLight from './assets/nexos-logo-light.png'
 import { useRos } from './ros'
 import {
   SystemPanel, NodesPanel, TopicsPanel, LifecyclePanel,
-  DiagnosticsPanel, ControlPanel, OdinPanel, FleetPanel, LogsPanel,
+  DiagnosticsPanel, ControlPanel, OdinPanel, FleetPanel, TelemetryPanel, LogsPanel,
 } from './panels'
 
-// Panels, die auch ohne aktive ROS-Verbindung sinnvoll sind (hier wählt man
-// den Roboter erst aus).
-const OFFLINE_OK = new Set(['Flotte'])
+// Panels, die auch ohne aktive ROS-Verbindung sinnvoll sind: Flotte (Roboterwahl)
+// und Telemetrie (liest UGV-Snapshots per https, nicht per ws).
+const OFFLINE_OK = new Set(['Flotte', 'Telemetrie'])
 
 const TABS = [
   ['Flotte', FleetPanel],
+  ['Telemetrie', TelemetryPanel],
   ['System', SystemPanel],
   ['ODIN', OdinPanel],
   ['Nodes', NodesPanel],
