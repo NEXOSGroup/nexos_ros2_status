@@ -13,7 +13,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew'
 import { Gauge, gaugeClasses } from '@mui/x-charts/Gauge'
 import { LineChart } from '@mui/x-charts/LineChart'
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart'
-import { useRos } from './ros'
+import { useRos, pageIsHttps } from './ros'
 
 const grid2 = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))' }
 const LVL = { 10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL' }
@@ -938,25 +938,20 @@ export function OdinPanel({ ros }) {
    (useRos.connect) — ein UGV ist nur eine gemeldete ws_url. Funktioniert auch
    ohne aktive ROS-Verbindung (deshalb useRos statt ros-Prop). */
 export function FleetPanel() {
-  const { url, status, connect, registry, setRegistry, ugvs, fleetError, autoConnect, setAutoConnect, selectedUgv, setSelectedUgv } = useRos()
+  const { url, status, connect, registry, ugvs, fleetError, selectedUgv, setSelectedUgv } = useRos()
   const online = (ugvs || []).filter((u) => u.online).length
 
   return (
     <Stack spacing={2}>
       <Card>
-        <CardHeader title="Flotte · Registry"
+        <CardHeader title="Flotte"
           titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }}
           action={<Chip size="small" color={online ? 'success' : 'default'} variant="outlined" label={`${online} online`} />} />
         <Divider />
-        <CardContent>
-          <Stack direction="row" spacing={2} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
-            <TextField size="small" label="Registry-URL" value={registry}
-              onChange={(e) => setRegistry(e.target.value)} sx={{ width: 'min(420px, 100%)' }} />
-            <FormControlLabel
-              control={<Switch size="small" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />}
-              label="Automatisch verbinden" />
-            {fleetError && <Chip size="small" color="error" variant="outlined" label="Registry nicht erreichbar" />}
-          </Stack>
+        <CardContent sx={{ py: 1.25 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ ...mono }}>
+            Service: {registry}{fleetError ? '  —  nicht erreichbar' : ''}
+          </Typography>
         </CardContent>
       </Card>
 
@@ -999,6 +994,42 @@ export function FleetPanel() {
             })}
           </Box>
         )}
+    </Stack>
+  )
+}
+
+/* ---------------- Einstellungen ---------------- */
+export function SettingsPanel() {
+  const { registry, setRegistry, fleetError, autoConnect, setAutoConnect } = useRos()
+  return (
+    <Stack spacing={2}>
+      <Card>
+        <CardHeader title="Einstellungen"
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+        <Divider />
+        <CardContent>
+          <Stack spacing={2.5}>
+            <Box>
+              <TextField fullWidth size="small" label="Registry-URL (Service)" value={registry}
+                onChange={(e) => setRegistry(e.target.value)} sx={{ maxWidth: 480 }} />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                Dienst, von dem Flotten-Liste und Telemetrie gelesen werden (https).
+                {fleetError ? ' — derzeit nicht erreichbar.' : ''}
+              </Typography>
+            </Box>
+            {!pageIsHttps && (
+              <Box>
+                <FormControlLabel
+                  control={<Switch checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />}
+                  label="Automatisch mit online UGV verbinden" />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  Direkte ws-Verbindung zur rosbridge eines UGV — nur im LAN sinnvoll.
+                </Typography>
+              </Box>
+            )}
+          </Stack>
+        </CardContent>
+      </Card>
     </Stack>
   )
 }

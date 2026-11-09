@@ -10,12 +10,12 @@ import logoLight from './assets/nexos-logo-light.png'
 import { useRos, pageIsHttps } from './ros'
 import {
   SystemPanel, NodesPanel, TopicsPanel, LifecyclePanel,
-  DiagnosticsPanel, ControlPanel, OdinPanel, FleetPanel, TelemetryPanel, LogsPanel,
+  DiagnosticsPanel, ControlPanel, OdinPanel, FleetPanel, TelemetryPanel, SettingsPanel, LogsPanel,
 } from './panels'
 
-// Panels, die auch ohne aktive ROS-Verbindung sinnvoll sind: Flotte (Roboterwahl)
-// und Telemetrie (liest UGV-Snapshots per https, nicht per ws).
-const OFFLINE_OK = new Set(['Flotte', 'Telemetrie'])
+// Panels, die auch ohne aktive ROS-Verbindung sinnvoll sind: Flotte (Roboterwahl),
+// Telemetrie (liest UGV-Snapshots per https) und Einstellungen.
+const OFFLINE_OK = new Set(['Flotte', 'Telemetrie', 'Einstellungen'])
 
 const TABS = [
   ['Flotte', FleetPanel],
@@ -28,12 +28,13 @@ const TABS = [
   ['Diagnostics', DiagnosticsPanel],
   ['ros2_control', ControlPanel],
   ['Logs', LogsPanel],
+  ['Einstellungen', SettingsPanel],
 ]
 
 // Die ws-basierten Tabs (Direktverbindung zum Roboter) ergeben nur im LAN (http)
-// Sinn. Oeffentlich (https) laeuft alles ueber den Service -> nur Flotte +
-// Telemetrie zeigen, und die ws-Verbindungsleiste ausblenden.
-const SERVICE_TABS = new Set(['Flotte', 'Telemetrie'])
+// Sinn. Oeffentlich (https) laeuft alles ueber den Service -> nur Flotte,
+// Telemetrie + Einstellungen zeigen, und die ws-Verbindungsleiste ausblenden.
+const SERVICE_TABS = new Set(['Flotte', 'Telemetrie', 'Einstellungen'])
 const VISIBLE_TABS = pageIsHttps ? TABS.filter(([n]) => SERVICE_TABS.has(n)) : TABS
 
 function useHeaderStats(ros, status) {
