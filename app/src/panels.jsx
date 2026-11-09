@@ -5,7 +5,7 @@ import {
   Chip, TextField, Button, Stack, Drawer, Box, Typography, LinearProgress,
   IconButton, ToggleButton, ToggleButtonGroup, Divider, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  Snackbar, Alert, CircularProgress,
+  Snackbar, Alert, CircularProgress, Switch, FormControlLabel,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import CloseIcon from '@mui/icons-material/Close'
@@ -937,33 +937,8 @@ export function OdinPanel({ ros }) {
    zu einem online UGV zu verbinden. Nutzt den bestehenden Connection-Manager
    (useRos.connect) — ein UGV ist nur eine gemeldete ws_url. Funktioniert auch
    ohne aktive ROS-Verbindung (deshalb useRos statt ros-Prop). */
-const DEFAULT_REGISTRY = import.meta.env.VITE_REGISTRY_URL || 'https://fleet.alps-robotics.com'
-
 export function FleetPanel() {
-  const { url, status, connect } = useRos()
-  const [registry, setRegistry] = useState(() => localStorage.getItem('fleet_registry_url') || DEFAULT_REGISTRY)
-  const [ugvs, setUgvs] = useState(null) // null = noch nie geladen
-  const [err, setErr] = useState(null)
-
-  useEffect(() => {
-    let alive = true
-    const base = registry.replace(/\/+$/, '')
-    const poll = async () => {
-      try {
-        const r = await fetch(base + '/ugvs', { cache: 'no-store' })
-        if (!r.ok) throw new Error('HTTP ' + r.status)
-        const data = await r.json()
-        if (alive) { setUgvs(Array.isArray(data) ? data : []); setErr(null) }
-      } catch (e) {
-        if (alive) setErr(String(e.message || e))
-      }
-    }
-    poll()
-    const id = setInterval(poll, 3000)
-    return () => { alive = false; clearInterval(id) }
-  }, [registry])
-
-  const saveRegistry = (v) => { setRegistry(v); try { localStorage.setItem('fleet_registry_url', v) } catch (e) {} }
+  const { url, status, connect, registry, setRegistry, ugvs, fleetError, autoConnect, setAutoConnect } = useRos()
   const online = (ugvs || []).filter((u) => u.online).length
 
   return (
@@ -974,10 +949,13 @@ export function FleetPanel() {
           action={<Chip size="small" color={online ? 'success' : 'default'} variant="outlined" label={`${online} online`} />} />
         <Divider />
         <CardContent>
-          <Stack direction="row" spacing={1} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
+          <Stack direction="row" spacing={2} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
             <TextField size="small" label="Registry-URL" value={registry}
-              onChange={(e) => saveRegistry(e.target.value)} sx={{ width: 'min(420px, 100%)' }} />
-            {err && <Chip size="small" color="error" variant="outlined" label="Registry nicht erreichbar" />}
+              onChange={(e) => setRegistry(e.target.value)} sx={{ width: 'min(420px, 100%)' }} />
+            <FormControlLabel
+              control={<Switch size="small" checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />}
+              label="Automatisch verbinden" />
+            {fleetError && <Chip size="small" color="error" variant="outlined" label="Registry nicht erreichbar" />}
           </Stack>
         </CardContent>
       </Card>
@@ -987,6 +965,7 @@ export function FleetPanel() {
           <Box sx={grid2}>
             {ugvs.map((u) => {
               const isCurrent = status === 'connected' && url === u.ws_url
+              const isConnecting = status === 'connecting' && url === u.ws_url
               return (
                 <Card key={u.id} sx={{ borderColor: u.online ? '#3fb95055' : undefined }}>
                   <CardContent>
@@ -1005,8 +984,8 @@ export function FleetPanel() {
                       <Typography variant="caption" sx={mono}>{u.age_s}s</Typography>
                     </Box>
                     <Button size="small" variant={isCurrent ? 'outlined' : 'contained'}
-                      disabled={!u.online || isCurrent} onClick={() => connect(u.ws_url)}>
-                      {isCurrent ? 'verbunden' : 'Verbinden'}
+                      disabled={!u.online || isCurrent || isConnecting} onClick={() => connect(u.ws_url)}>
+                      {isCurrent ? 'verbunden' : isConnecting ? 'verbinde …' : 'Verbinden'}
                     </Button>
                   </CardContent>
                 </Card>
