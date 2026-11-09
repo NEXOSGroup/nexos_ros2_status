@@ -1151,9 +1151,15 @@ function TileShell({ accent, children }) {
 function TileBox({ t, history }) {
   const col = SEV_COLOR[t.severity]
   const dim = t.value === null || t.value === undefined
-  const Label = <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.4 }}>{t.label}</Typography>
+  const Label = (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.4, lineHeight: 1.3 }}>{t.label}</Typography>
+  )
   const Value = (
-    <Typography sx={{ ...mono, fontSize: 19, fontWeight: 600, lineHeight: 1.2, color: dim ? 'text.disabled' : (col || 'text.primary') }}>
+    <Typography title={fmtTile(t)} sx={{
+      fontFamily: 'ui-monospace,Menlo,monospace', fontWeight: 600, lineHeight: 1.2,
+      fontSize: { xs: 16, sm: 19 }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      color: dim ? 'text.disabled' : (col || 'text.primary'),
+    }}>
       {fmtTile(t)}
     </Typography>
   )
@@ -1190,8 +1196,9 @@ function TileBox({ t, history }) {
       <TileShell accent={t.value ? (col || '#d29922') : undefined}>
         {Label}
         {t.value
-          ? <Chip size="small" color={sevChip(t.severity || 'warn')} label={t.label || 'aktiv'} sx={{ fontWeight: 600 }} />
-          : <Typography sx={{ ...mono, color: 'text.disabled' }}>–</Typography>}
+          ? <Chip size="small" color={sevChip(t.severity || 'warn')} label={t.label || 'aktiv'}
+              sx={{ fontWeight: 600, height: 'auto', maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.3, lineHeight: 1.3 } }} />
+          : <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.disabled' }}>–</Typography>}
       </TileShell>
     )
   }
@@ -1202,8 +1209,9 @@ function TileBox({ t, history }) {
       <TileShell accent={col}>
         {Label}
         {dim
-          ? <Typography sx={{ ...mono, color: 'text.disabled' }}>–</Typography>
-          : <Chip size="small" variant="outlined" color={sevChip(t.severity || 'ok')} label={String(t.value)} sx={{ fontWeight: 600, maxWidth: '100%' }} />}
+          ? <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.disabled' }}>–</Typography>
+          : <Chip size="small" variant="outlined" color={sevChip(t.severity || 'ok')} label={String(t.value)}
+              sx={{ fontWeight: 600, maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', display: 'block', py: 0.3, lineHeight: 1.3 } }} />}
       </TileShell>
     )
   }
@@ -1337,7 +1345,7 @@ export function TelemetryPanel({ ugvId }) {
                   action={g.severity ? <Chip size="small" color={sevChip(g.severity)} label={String(g.severity).toUpperCase()} /> : null} />
                 <Divider />
                 <CardContent>
-                  <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))' }}>
+                  <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))' }}>
                     {(g.tiles || []).map((t) => <TileBox key={t.id} t={t} history={hist.current[g.id + '.' + t.id]} />)}
                   </Box>
                 </CardContent>

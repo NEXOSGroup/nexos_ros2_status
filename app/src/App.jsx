@@ -62,13 +62,13 @@ export default function App() {
           <Box component="a" href="#/" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, textDecoration: 'none', color: 'inherit' }}>
             <img src={logoLight} alt="NEXOS.Group" style={{ height: 90, display: 'block' }} />
             <Divider orientation="vertical" flexItem sx={{ my: 0.75 }} />
-            <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.secondary', letterSpacing: 1, fontSize: 15 }}>
+            <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.secondary', letterSpacing: 1, fontSize: 15, display: { xs: 'none', sm: 'block' } }}>
               ros_status
             </Typography>
           </Box>
           <Box sx={{ flexGrow: 1 }} />
           {route.name !== 'home' && (
-            <Button href="#/" size="small" variant="outlined">← Startseite</Button>
+            <Button href="#/" size="small" variant="outlined" sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>← Startseite</Button>
           )}
           {route.name !== 'settings' && (
             <Tooltip title="Einstellungen">
