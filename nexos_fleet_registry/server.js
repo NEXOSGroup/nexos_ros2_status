@@ -1,0 +1,118 @@
+// NEXOS fleet registry — minimaler Heartbeat-Register fuer UGVs.
+//
+// Jeder UGV sendet periodisch einen Heartbeat (POST /heartbeat) mit seiner
+// aktuellen rosbridge-Adresse. Der Dienst merkt sich "zuletzt gesehen" und
+// liefert (GET /ugvs) die Flotte mit online/offline. Damit ist die wechselnde
+// IP eines UGV egal: der UGV meldet seine Adresse selbst.
+//
+// Bewusst ohne Auth (ziviler Demo). Vor Produktiv/Defence: Token/mTLS fuer
+// Heartbeats, Zugriffsschutz der Liste, Rate-Limiting — siehe README (TODO).
+//
+// Keine externen Abhaengigkeiten (nur Node >=18 stdlib) -> einfaches Deployment
+// (z. B. Plesk-Node.js), analog zu nexos_status_sim.
+
+import http from 'node:http'
+
+const PORT = Number(process.env.PORT || 8090)
+// Nach so vielen ms ohne Heartbeat gilt ein UGV als offline.
+const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 10000)
+// UGVs, die laenger als das weg sind, werden ganz vergessen.
+const FORGET_MS = Number(process.env.FORGET_MS || 1000 * 60 * 60)
+const MAX_BODY = 8 * 1024 // Heartbeats sind winzig; grosse Bodies ablehnen.
+
+/** @type {Map<string, {id:string,name:string,ws_url:string,status:string,last_seen:number}>} */
+const fleet = new Map()
+
+const isStr = (v, max = 200) => typeof v === 'string' && v.length > 0 && v.length <= max
+// Nur ws:// oder wss:// zulassen — kein beliebiges Schema in die Liste schreiben.
+const isWsUrl = (v) => isStr(v, 300) && /^wss?:\/\/[^\s]+$/i.test(v)
+
+function sendJson(res, code, obj) {
+  const body = JSON.stringify(obj)
+  res.writeHead(code, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store',
+  })
+  res.end(body)
+}
+
+function listUgvs() {
+  const now = Date.now()
+  return [...fleet.values()]
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      ws_url: u.ws_url,
+      status: u.status,
+      online: now - u.last_seen < OFFLINE_TIMEOUT_MS,
+      last_seen: new Date(u.last_seen).toISOString(),
+      age_s: Math.round((now - u.last_seen) / 1000),
+    }))
+    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    let tooBig = false
+    req.on('data', (chunk) => {
+      data += chunk
+      if (data.length > MAX_BODY) {
+        tooBig = true
+        req.destroy()
+      }
+    })
+    req.on('end', () => (tooBig ? reject(new Error('body too large')) : resolve(data)))
+    req.on('error', reject)
+  })
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+
+  if (req.method === 'OPTIONS') return sendJson(res, 204, {})
+
+  if (req.method === 'GET' && url.pathname === '/healthz') {
+    return sendJson(res, 200, { ok: true, ugvs: fleet.size })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/ugvs') {
+    return sendJson(res, 200, listUgvs())
+  }
+
+  if (req.method === 'POST' && url.pathname === '/heartbeat') {
+    let payload
+    try {
+      payload = JSON.parse(await readBody(req))
+    } catch {
+      return sendJson(res, 400, { ok: false, error: 'invalid or too large JSON' })
+    }
+    if (!payload || !isStr(payload.id, 64) || !isWsUrl(payload.ws_url)) {
+      return sendJson(res, 400, { ok: false, error: 'id and valid ws_url required' })
+    }
+    const id = payload.id.trim()
+    fleet.set(id, {
+      id,
+      name: isStr(payload.name, 120) ? payload.name : id,
+      ws_url: payload.ws_url,
+      status: isStr(payload.status, 60) ? payload.status : 'unknown',
+      last_seen: Date.now(),
+    })
+    return sendJson(res, 200, { ok: true })
+  }
+
+  sendJson(res, 404, { ok: false, error: 'not found' })
+})
+
+// Lange verschollene UGVs vergessen, damit die Liste nicht ewig waechst.
+setInterval(() => {
+  const now = Date.now()
+  for (const [id, u] of fleet) if (now - u.last_seen > FORGET_MS) fleet.delete(id)
+}, 30000).unref()
+
+server.listen(PORT, () => {
+  console.log(`[fleet-registry] hoert auf :${PORT} (offline nach ${OFFLINE_TIMEOUT_MS} ms)`)
+})
