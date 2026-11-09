@@ -1134,29 +1134,89 @@ function fmtTile(t) {
   return String(v)
 }
 
+const isFiniteNum = (v) => v !== null && v !== undefined && Number.isFinite(Number(v))
+
+function TileShell({ accent, children }) {
+  return (
+    <Box sx={{
+      p: 1.1, borderRadius: 1.5, bgcolor: '#0e1116', minHeight: 70,
+      border: '1px solid', borderColor: 'divider',
+      borderLeft: '3px solid', borderLeftColor: accent || '#2a333d',
+      transition: 'border-color .15s ease, transform .15s ease, box-shadow .15s ease',
+      '&:hover': { borderColor: '#33404c', transform: 'translateY(-1px)', boxShadow: '0 4px 14px rgba(0,0,0,0.35)' },
+    }}>{children}</Box>
+  )
+}
+
 function TileBox({ t, history }) {
   const col = SEV_COLOR[t.severity]
-  if (t.kind === 'flag') {
+  const dim = t.value === null || t.value === undefined
+  const Label = <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.4 }}>{t.label}</Typography>
+  const Value = (
+    <Typography sx={{ ...mono, fontSize: 19, fontWeight: 600, lineHeight: 1.2, color: dim ? 'text.disabled' : (col || 'text.primary') }}>
+      {fmtTile(t)}
+    </Typography>
+  )
+
+  // Gauge — Roboter liefert kind:'gauge' + min/max
+  if (t.kind === 'gauge' && isFiniteNum(t.value) && isFiniteNum(t.min) && isFiniteNum(t.max)) {
     return (
-      <Box sx={{ p: 1, borderRadius: 1, bgcolor: '#0e1116', border: '1px solid', borderColor: 'divider' }}>
-        {t.value
-          ? <Chip size="small" color={sevChip(t.severity || 'warn')} label={t.label} />
-          : (<>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t.label}</Typography>
-              <Typography sx={{ ...mono }}>–</Typography>
-            </>)}
-      </Box>
+      <TileShell accent={col}>
+        {Label}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+          <Gauge width={58} height={58} value={Number(t.value)} valueMin={Number(t.min)} valueMax={Number(t.max)}
+            sx={{ [`& .${gaugeClasses.valueText}`]: { display: 'none' }, [`& .${gaugeClasses.valueArc}`]: { fill: col || '#c8a34e' }, [`& .${gaugeClasses.referenceArc}`]: { fill: '#1b222b' } }} />
+          {Value}
+        </Box>
+      </TileShell>
     )
   }
+
+  // Balken — Roboter liefert kind:'bar' + min/max
+  if (t.kind === 'bar' && isFiniteNum(t.value) && isFiniteNum(t.min) && isFiniteNum(t.max)) {
+    const pct = Math.max(0, Math.min(100, ((Number(t.value) - Number(t.min)) / (Number(t.max) - Number(t.min))) * 100))
+    return (
+      <TileShell accent={col}>
+        {Label}{Value}
+        <LinearProgress variant="determinate" value={pct}
+          sx={{ mt: 0.75, height: 7, borderRadius: 4, bgcolor: '#1b222b', ['& .MuiLinearProgress-bar']: { borderRadius: 4, backgroundColor: col || '#58a6ff' } }} />
+      </TileShell>
+    )
+  }
+
+  // Flag -> Badge
+  if (t.kind === 'flag') {
+    return (
+      <TileShell accent={t.value ? (col || '#d29922') : undefined}>
+        {Label}
+        {t.value
+          ? <Chip size="small" color={sevChip(t.severity || 'warn')} label={t.label || 'aktiv'} sx={{ fontWeight: 600 }} />
+          : <Typography sx={{ ...mono, color: 'text.disabled' }}>–</Typography>}
+      </TileShell>
+    )
+  }
+
+  // Enum/Status -> farbige Pill
+  if (t.kind === 'enum' || t.kind === 'status') {
+    return (
+      <TileShell accent={col}>
+        {Label}
+        {dim
+          ? <Typography sx={{ ...mono, color: 'text.disabled' }}>–</Typography>
+          : <Chip size="small" variant="outlined" color={sevChip(t.severity || 'ok')} label={String(t.value)} sx={{ fontWeight: 600, maxWidth: '100%' }} />}
+      </TileShell>
+    )
+  }
+
+  // number / hex / text
   return (
-    <Box sx={{ p: 1, borderRadius: 1, bgcolor: '#0e1116', border: '1px solid', borderColor: 'divider' }}>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t.label}</Typography>
-      <Typography sx={{ ...mono, fontSize: 18, color: col || 'text.primary' }}>{fmtTile(t)}</Typography>
+    <TileShell accent={col}>
+      {Label}{Value}
       {t.spark && history && history.length > 1 && (
-        <SparkLineChart data={history} height={34} showHighlight curve="monotoneX"
-          color={col || '#58a6ff'} sx={{ ['& .MuiLineElement-root']: { strokeWidth: 1.5 } }} />
+        <SparkLineChart data={history} height={30} showHighlight curve="monotoneX"
+          color={col || '#58a6ff'} sx={{ mt: 0.5, ['& .MuiLineElement-root']: { strokeWidth: 1.75 } }} />
       )}
-    </Box>
+    </TileShell>
   )
 }
 
@@ -1244,10 +1304,21 @@ export function TelemetryPanel({ ugvId }) {
               <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
                 <Typography variant="caption" color="text.secondary">Kacheln:</Typography>
                 {groups.map((g) => (
-                  <Chip key={g.id} size="small" label={g.title || g.id}
-                    color={hidden.has(g.id) ? 'default' : 'primary'}
-                    variant={hidden.has(g.id) ? 'outlined' : 'filled'}
-                    onClick={() => toggleGroup(g.id)} />
+                  <ToggleButton key={g.id} value={g.id} size="small" selected={!hidden.has(g.id)}
+                    onChange={() => toggleGroup(g.id)}
+                    sx={{
+                      textTransform: 'none', fontWeight: 600, py: 0.3, px: 1.25, borderRadius: 1.5,
+                      color: 'text.secondary', borderColor: 'divider', lineHeight: 1.4,
+                      transition: 'transform .12s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease',
+                      '&:hover': { borderColor: '#c8a34e', backgroundColor: 'rgba(200,163,78,0.10)', transform: 'translateY(-1px)' },
+                      '&.Mui-selected': {
+                        color: '#0e1116', backgroundColor: '#c8a34e', borderColor: '#c8a34e',
+                        boxShadow: '0 2px 10px rgba(200,163,78,0.35)',
+                        '&:hover': { backgroundColor: '#d6b05a', transform: 'translateY(-1px)' },
+                      },
+                    }}>
+                    {g.title || g.id}
+                  </ToggleButton>
                 ))}
               </Stack>
             ) : (ugvId && <Typography variant="caption" color="text.secondary">Wähle oben Kacheln zum Ein-/Ausblenden (sobald welche ankommen).</Typography>)}

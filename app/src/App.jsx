@@ -60,7 +60,7 @@ export default function App() {
       <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
         <Toolbar sx={{ gap: 1.5, py: 1 }}>
           <Box component="a" href="#/" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, textDecoration: 'none', color: 'inherit' }}>
-            <img src={logoLight} alt="NEXOS.Group" style={{ height: 72, display: 'block' }} />
+            <img src={logoLight} alt="NEXOS.Group" style={{ height: 90, display: 'block' }} />
             <Divider orientation="vertical" flexItem sx={{ my: 0.75 }} />
             <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.secondary', letterSpacing: 1, fontSize: 15 }}>
               ros_status
