@@ -1,0 +1,13 @@
+# NEXOS fleet registry — Plesk/Passenger
+#
+# NUR noetig, wenn der Anwendungsstamm UNTERHALB einer bestehenden CMS-Seite
+# (z. B. TYPO3) liegt, z. B. /httpdocs/html/fleet.<domain>. Deren .htaccess
+# leitet jede nicht existierende Datei per RewriteRule auf index.php um. In
+# unserem Node-Ordner gibt es keine index.php -> Endlos-Redirect
+# (Apache AH00124) -> HTTP 500; Passenger/Node wird nie erreicht.
+#
+# Diese Datei schaltet mod_rewrite fuer DIESEN Ordner ab, sodass die geerbten
+# CMS-Rewrites hier nicht greifen und Passenger die Node-App bedient.
+# Statische Dateien (z. B. .well-known/acme-challenge fuer Let's Encrypt)
+# werden weiterhin direkt ausgeliefert.
+RewriteEngine Off

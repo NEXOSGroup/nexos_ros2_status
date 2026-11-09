@@ -52,6 +52,25 @@ aktivieren.
 Anders als beim Sim: hier ist **kein WebSocket-Upgrade** nötig → der Plesk-
 „Proxy mode" darf **an** bleiben (der WS-Sonderfall des Sims gilt hier nicht).
 
+**Nur `server.js` + `package.json`** in den Anwendungsstamm — eine evtl. von Plesk
+angelegte `index.html` **löschen** (sonst bedient Apache die statisch bei `/`).
+
+### Stolperfalle: Anwendungsstamm liegt unter einer CMS-Seite (z. B. TYPO3)
+
+Liegt der Node-Anwendungsstamm **innerhalb** einer bestehenden Seite (z. B.
+`/httpdocs/html/fleet.<domain>` unter einer TYPO3-Installation), greift deren
+`.htaccess` durch: Die TYPO3-Catch-all-Regel
+(`RewriteRule ^.*$ … index.php [QSA,L]`) leitet jede nicht existierende Datei auf
+`index.php` um. In unserem Ordner gibt es keine → **Endlos-Redirect**
+(`AH00124: Request exceeded the limit of 10 internal redirects`) → **HTTP 500**,
+Passenger wird nie erreicht.
+
+**Fix:** die mitgelieferte **`plesk/.htaccess`** (`RewriteEngine Off`) in den
+Anwendungsstamm legen (als `.htaccess`). Dann greifen die geerbten CMS-Rewrites
+dort nicht mehr und Passenger bedient die Node-App. Danach „App neu starten".
+Besser noch, falls möglich: den Anwendungsstamm **außerhalb** der CMS-Seite
+anlegen (eigene Subdomain-Docroot, nicht unter `httpdocs/html/…`).
+
 ## Konfiguration (Env)
 
 | Var | Default | Zweck |
