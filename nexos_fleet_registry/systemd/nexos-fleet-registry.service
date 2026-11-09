@@ -1,0 +1,25 @@
+[Unit]
+Description=NEXOS fleet registry (UGV heartbeat register)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Deploy-User anpassen (laeuft auf dem SERVER, nicht auf dem Roboter)
+User=nexos
+# Auf das deployte Verzeichnis zeigen lassen
+WorkingDirectory=/opt/nexos_fleet_registry
+Environment=PORT=8090
+Environment=OFFLINE_TIMEOUT_MS=10000
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+
+# Minimale Haertung (keine Secrets, kein FS-Schreibzugriff noetig)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
