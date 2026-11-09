@@ -6,6 +6,14 @@ const RosCtx = createContext(null)
 const DEFAULT_URL = `ws://${window.location.hostname || '192.168.0.202'}:9090`
 export const DEFAULT_REGISTRY = import.meta.env.VITE_REGISTRY_URL || 'https://fleet.alps-robotics.com'
 
+// ws:// (unverschluesselt) laesst sich von einer https-Seite nicht oeffnen
+// (Mixed-Content), und LAN-Adressen sind oeffentlich ohnehin nicht erreichbar.
+// Auf https daher nur wss:// zulassen — sonst flackert der Verbindungsstatus
+// (connecting<->disconnected) im Dauer-Retry. Die oeffentliche Oberflaeche nutzt
+// die https-Telemetrie-Snapshots (Telemetrie-Tab), nicht ws.
+export const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+const canOpenWs = (u) => !!u && (!pageIsHttps || /^wss:\/\//i.test(u))
+
 export function RosProvider({ children }) {
   const [ros, setRos] = useState(null)
   const [status, setStatus] = useState('disconnected') // 'connecting' | 'connected' | 'disconnected'
@@ -63,8 +71,9 @@ export function RosProvider({ children }) {
     try { if (id) localStorage.setItem('fleet_selected_ugv', id); else localStorage.removeItem('fleet_selected_ugv') } catch (e) {}
   }, [])
 
-  // auto-connect to the last/default endpoint on first load
-  useEffect(() => { connect(url) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // auto-connect to the last/default endpoint on first load — aber nur, wenn die
+  // ws-URL von dieser Seite aus ueberhaupt oeffenbar ist (nicht auf https).
+  useEffect(() => { if (canOpenWs(url)) connect(url) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Registry zyklisch abfragen (eine Quelle fuer alle: Flotte-Tab + Auto-Connect)
   useEffect(() => {
@@ -94,7 +103,7 @@ export function RosProvider({ children }) {
     const onlineList = (ugvs || []).filter((u) => u.online && u.ws_url)
     if (onlineList.length === 0) return
     const target = onlineList.find((u) => u.ws_url === url) || onlineList[0]
-    connect(target.ws_url)
+    if (canOpenWs(target.ws_url)) connect(target.ws_url)
   }, [autoConnect, status, ugvs, url, connect])
 
   // Auto-Auswahl fuer den Telemetrie-Tab: wenn nichts (mehr) gewaehlt ist, das

@@ -7,7 +7,7 @@ import {
 import HistoryIcon from '@mui/icons-material/History'
 import CircleIcon from '@mui/icons-material/Circle'
 import logoLight from './assets/nexos-logo-light.png'
-import { useRos } from './ros'
+import { useRos, pageIsHttps } from './ros'
 import {
   SystemPanel, NodesPanel, TopicsPanel, LifecyclePanel,
   DiagnosticsPanel, ControlPanel, OdinPanel, FleetPanel, TelemetryPanel, LogsPanel,
@@ -29,6 +29,12 @@ const TABS = [
   ['ros2_control', ControlPanel],
   ['Logs', LogsPanel],
 ]
+
+// Die ws-basierten Tabs (Direktverbindung zum Roboter) ergeben nur im LAN (http)
+// Sinn. Oeffentlich (https) laeuft alles ueber den Service -> nur Flotte +
+// Telemetrie zeigen, und die ws-Verbindungsleiste ausblenden.
+const SERVICE_TABS = new Set(['Flotte', 'Telemetrie'])
+const VISIBLE_TABS = pageIsHttps ? TABS.filter(([n]) => SERVICE_TABS.has(n)) : TABS
 
 function useHeaderStats(ros, status) {
   const [stats, setStats] = useState({ nodes: 0, topics: 0, err: 0, warn: 0, diagErr: 0, diagWarn: 0 })
@@ -87,8 +93,8 @@ export default function App() {
   else if (stats.err > 0 || stats.diagErr > 0) health = { c: 'error', t: 'PROBLEM' }
   else if (stats.warn > 0 || stats.diagWarn > 0) health = { c: 'warning', t: 'WARN' }
 
-  const Panel = TABS[tab][1]
-  const showOffline = OFFLINE_OK.has(TABS[tab][0])
+  const Panel = VISIBLE_TABS[tab][1]
+  const showOffline = OFFLINE_OK.has(VISIBLE_TABS[tab][0])
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -102,42 +108,47 @@ export default function App() {
             </Typography>
           </Box>
 
-          {/* Connection manager */}
-          <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
-          <TextField
-            size="small" label="Bridge (ws://robot:9090)" value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && connect(input)}
-            sx={{ width: 280 }}
-          />
-          <Button variant="contained" onClick={() => connect(input)}>Verbinden</Button>
-          <Tooltip title="Zuletzt verwendet">
-            <IconButton onClick={(e) => setMenuEl(e.currentTarget)}><HistoryIcon /></IconButton>
-          </Tooltip>
-          <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
-            {recent.length === 0 && <MenuItem disabled>keine</MenuItem>}
-            {recent.map((u) => (
-              <MenuItem key={u} onClick={() => { setMenuEl(null); setInput(u); connect(u) }}>{u}</MenuItem>
-            ))}
-          </Menu>
-          <Chip size="small" color={statusColor} variant="outlined"
-            icon={<CircleIcon sx={{ fontSize: 12 }} />} label={statusLabel} />
+          {/* Connection manager — nur im LAN (http). Oeffentlich (https) laeuft
+              alles ueber den Service, keine Direkt-ws-Verbindung. */}
+          {!pageIsHttps && (<>
+            <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
+            <TextField
+              size="small" label="Bridge (ws://robot:9090)" value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && connect(input)}
+              sx={{ width: 280 }}
+            />
+            <Button variant="contained" onClick={() => connect(input)}>Verbinden</Button>
+            <Tooltip title="Zuletzt verwendet">
+              <IconButton onClick={(e) => setMenuEl(e.currentTarget)}><HistoryIcon /></IconButton>
+            </Tooltip>
+            <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
+              {recent.length === 0 && <MenuItem disabled>keine</MenuItem>}
+              {recent.map((u) => (
+                <MenuItem key={u} onClick={() => { setMenuEl(null); setInput(u); connect(u) }}>{u}</MenuItem>
+              ))}
+            </Menu>
+            <Chip size="small" color={statusColor} variant="outlined"
+              icon={<CircleIcon sx={{ fontSize: 12 }} />} label={statusLabel} />
+          </>)}
 
           <Box sx={{ flexGrow: 1 }} />
 
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip size="small" variant="outlined" label={`${stats.nodes} Nodes`} />
-            <Chip size="small" variant="outlined" label={`${stats.topics} Topics`} />
-            <Chip size="small" variant="outlined" color={stats.warn ? 'warning' : 'default'} label={`${stats.warn} Warn/60s`} />
-            <Chip size="small" variant="outlined" color={stats.err ? 'error' : 'default'} label={`${stats.err} Err/60s`} />
-            <Chip size="small" variant="outlined" color={stats.diagErr ? 'error' : stats.diagWarn ? 'warning' : 'default'}
-              label={`Diag ${stats.diagErr}✕ / ${stats.diagWarn}⚠`} />
-            <Chip size="small" color={health.c} label={health.t} />
-          </Stack>
+          {!pageIsHttps && (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip size="small" variant="outlined" label={`${stats.nodes} Nodes`} />
+              <Chip size="small" variant="outlined" label={`${stats.topics} Topics`} />
+              <Chip size="small" variant="outlined" color={stats.warn ? 'warning' : 'default'} label={`${stats.warn} Warn/60s`} />
+              <Chip size="small" variant="outlined" color={stats.err ? 'error' : 'default'} label={`${stats.err} Err/60s`} />
+              <Chip size="small" variant="outlined" color={stats.diagErr ? 'error' : stats.diagWarn ? 'warning' : 'default'}
+                label={`Diag ${stats.diagErr}✕ / ${stats.diagWarn}⚠`} />
+              <Chip size="small" color={health.c} label={health.t} />
+            </Stack>
+          )}
         </Toolbar>
         <Tabs value={tab} onChange={(e, v) => setTab(v)} variant="scrollable" scrollButtons="auto"
           sx={{ px: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-          {TABS.map(([name]) => <Tab key={name} label={name} />)}
+          {VISIBLE_TABS.map(([name]) => <Tab key={name} label={name} />)}
         </Tabs>
       </AppBar>
 
