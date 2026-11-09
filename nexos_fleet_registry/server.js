@@ -13,7 +13,11 @@
 
 import http from 'node:http'
 
-const PORT = Number(process.env.PORT || 8090)
+// Plesk/Passenger uebergibt in PORT einen Unix-Socket-PFAD (kein numerischer
+// Port). Darum NICHT nach Number zwingen: ein numerischer Wert wird zum TCP-Port,
+// ein Socket-Pfad bleibt String und wird direkt an listen() gegeben.
+const RAW_PORT = process.env.PORT || 8090
+const PORT = /^\d+$/.test(String(RAW_PORT)) ? Number(RAW_PORT) : RAW_PORT
 // Nach so vielen ms ohne Heartbeat gilt ein UGV als offline.
 const OFFLINE_TIMEOUT_MS = Number(process.env.OFFLINE_TIMEOUT_MS || 10000)
 // UGVs, die laenger als das weg sind, werden ganz vergessen.
