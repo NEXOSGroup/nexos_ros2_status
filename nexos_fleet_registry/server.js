@@ -11,7 +11,7 @@
 // Keine externen Abhaengigkeiten (nur Node >=18 stdlib) -> einfaches Deployment
 // (z. B. Plesk-Node.js), analog zu nexos_status_sim.
 
-import http from 'node:http'
+const http = require('node:http')
 
 // Plesk/Passenger uebergibt in PORT einen Unix-Socket-PFAD (kein numerischer
 // Port). Darum NICHT nach Number zwingen: ein numerischer Wert wird zum TCP-Port,
