@@ -998,6 +998,62 @@ export function FleetPanel() {
   )
 }
 
+/* ---------------- Startseite (Kacheln) ----------------
+   Landing-Page: eine Kachel pro online UGV (-> Unterseite mit dessen Telemetrie)
+   plus eine Einstellungen-Kachel. Navigiert per Hash-Route. */
+const tileGrid = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }
+
+function HomeTile({ title, subtitle, href, online, accent }) {
+  return (
+    <Card component="a" href={href} sx={{
+      textDecoration: 'none', color: 'inherit', display: 'block', cursor: 'pointer',
+      borderColor: online ? '#3fb95066' : 'divider',
+      transition: 'border-color .15s ease, transform .15s ease',
+      '&:hover': { borderColor: accent || '#c8a34e', transform: 'translateY(-2px)' },
+    }}>
+      <CardContent>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+          {online !== undefined && (
+            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: online ? '#3fb950' : '#8b98a5' }} />
+          )}
+          <Typography sx={{ fontWeight: 600, fontSize: 18, flexGrow: 1 }}>{title}</Typography>
+          <Typography sx={{ color: 'text.secondary', fontSize: 20, lineHeight: 1 }}>›</Typography>
+        </Stack>
+        <Typography variant="body2" color="text.secondary">{subtitle}</Typography>
+      </CardContent>
+    </Card>
+  )
+}
+
+export function HomePanel() {
+  const { ugvs, fleetError } = useRos()
+  const list = ugvs || []
+  const online = list.filter((u) => u.online)
+  const offline = list.filter((u) => !u.online)
+  return (
+    <Stack spacing={2}>
+      <Box sx={tileGrid}>
+        {online.map((u) => (
+          <HomeTile key={u.id} online title={u.name || u.id}
+            subtitle={`online · ${u.status || 'unbekannt'}`}
+            href={`#/ugv/${encodeURIComponent(u.id)}`} />
+        ))}
+        <HomeTile title="Einstellungen" subtitle="Service · Verbindung" href="#/settings" accent="#58a6ff" />
+      </Box>
+      {online.length === 0 && (
+        <Empty>{fleetError
+          ? 'Service nicht erreichbar.'
+          : 'Kein UGV online. Sobald ein UGV sendet, erscheint hier eine Kachel.'}</Empty>
+      )}
+      {offline.length > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          Offline: {offline.map((u) => u.name || u.id).join(', ')}
+        </Typography>
+      )}
+    </Stack>
+  )
+}
+
 /* ---------------- Einstellungen ---------------- */
 export function SettingsPanel() {
   const { registry, setRegistry, fleetError, autoConnect, setAutoConnect } = useRos()
@@ -1083,8 +1139,9 @@ function TileBox({ t, history }) {
   )
 }
 
-export function TelemetryPanel() {
+export function TelemetryPanel({ ugvId }) {
   const { registry, ugvs, selectedUgv, setSelectedUgv } = useRos()
+  const activeId = ugvId || selectedUgv
   const [snap, setSnap] = useState(null)
   const [err, setErr] = useState(null)
   const [stale, setStale] = useState(false)
@@ -1094,20 +1151,20 @@ export function TelemetryPanel() {
   // sichtbare/versteckte Gruppen je UGV merken + bei UGV-Wechsel Historie leeren
   useEffect(() => {
     try {
-      const raw = selectedUgv ? localStorage.getItem('tiles_hidden_' + selectedUgv) : null
+      const raw = activeId ? localStorage.getItem('tiles_hidden_' + activeId) : null
       setHidden(new Set(raw ? JSON.parse(raw) : []))
     } catch (e) { setHidden(new Set()) }
     hist.current = {}
     setSnap(null)
-  }, [selectedUgv])
+  }, [activeId])
 
   useEffect(() => {
-    if (!selectedUgv) return
+    if (!activeId) return
     let alive = true
     const base = (registry || '').replace(/\/+$/, '')
     const poll = async () => {
       try {
-        const r = await fetch(`${base}/telemetry?id=${encodeURIComponent(selectedUgv)}`, { cache: 'no-store' })
+        const r = await fetch(`${base}/telemetry?id=${encodeURIComponent(activeId)}`, { cache: 'no-store' })
         if (r.status === 404) { if (alive) { setSnap(null); setErr(null); setStale(false) } return }
         if (!r.ok) throw new Error('HTTP ' + r.status)
         const d = await r.json()
@@ -1128,12 +1185,12 @@ export function TelemetryPanel() {
     poll()
     const id = setInterval(poll, 1000)
     return () => { alive = false; clearInterval(id) }
-  }, [registry, selectedUgv])
+  }, [registry, activeId])
 
   const toggleGroup = (gid) => setHidden((prev) => {
     const next = new Set(prev)
     if (next.has(gid)) next.delete(gid); else next.add(gid)
-    try { localStorage.setItem('tiles_hidden_' + selectedUgv, JSON.stringify([...next])) } catch (e) {}
+    try { localStorage.setItem('tiles_hidden_' + activeId, JSON.stringify([...next])) } catch (e) {}
     return next
   })
 
@@ -1148,35 +1205,38 @@ export function TelemetryPanel() {
             label={stale ? `veraltet · ${snap.age_s}s` : `live · ${snap.age_s}s`} /> : null} />
         <Divider />
         <CardContent>
-          {list.length === 0 ? <Typography variant="body2" color="text.secondary">Keine UGVs angemeldet.</Typography> : (
-            <Stack spacing={1.5}>
-              <ToggleButtonGroup exclusive size="small" value={selectedUgv} onChange={(e, v) => v && setSelectedUgv(v)}>
-                {list.map((u) => (
-                  <ToggleButton key={u.id} value={u.id} sx={{ textTransform: 'none', gap: 0.75 }}>
-                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: u.online ? '#3fb950' : '#8b98a5' }} />
-                    {u.name || u.id}
-                  </ToggleButton>
-                ))}
-              </ToggleButtonGroup>
-              {groups.length > 0 && (
-                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Typography variant="caption" color="text.secondary">Kacheln:</Typography>
-                  {groups.map((g) => (
-                    <Chip key={g.id} size="small" label={g.title || g.id}
-                      color={hidden.has(g.id) ? 'default' : 'primary'}
-                      variant={hidden.has(g.id) ? 'outlined' : 'filled'}
-                      onClick={() => toggleGroup(g.id)} />
+          <Stack spacing={1.5}>
+            {/* UGV-Auswahl nur im Standalone-Modus; auf der UGV-Unterseite ist der UGV fix. */}
+            {!ugvId && (list.length === 0
+              ? <Typography variant="body2" color="text.secondary">Keine UGVs angemeldet.</Typography>
+              : (
+                <ToggleButtonGroup exclusive size="small" value={selectedUgv} onChange={(e, v) => v && setSelectedUgv(v)}>
+                  {list.map((u) => (
+                    <ToggleButton key={u.id} value={u.id} sx={{ textTransform: 'none', gap: 0.75 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: u.online ? '#3fb950' : '#8b98a5' }} />
+                      {u.name || u.id}
+                    </ToggleButton>
                   ))}
-                </Stack>
-              )}
-            </Stack>
-          )}
+                </ToggleButtonGroup>
+              ))}
+            {groups.length > 0 ? (
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary">Kacheln:</Typography>
+                {groups.map((g) => (
+                  <Chip key={g.id} size="small" label={g.title || g.id}
+                    color={hidden.has(g.id) ? 'default' : 'primary'}
+                    variant={hidden.has(g.id) ? 'outlined' : 'filled'}
+                    onClick={() => toggleGroup(g.id)} />
+                ))}
+              </Stack>
+            ) : (ugvId && <Typography variant="caption" color="text.secondary">Wähle oben Kacheln zum Ein-/Ausblenden (sobald welche ankommen).</Typography>)}
+          </Stack>
         </CardContent>
       </Card>
 
-      {!selectedUgv ? null :
+      {!activeId ? null :
         err ? <Empty>Telemetrie nicht erreichbar ({err}).</Empty> :
-        !snap ? <Empty>Warte auf Telemetrie von „{selectedUgv}" … (UGV muss an /telemetry senden)</Empty> :
+        !snap ? <Empty>Warte auf Telemetrie von „{activeId}" … (UGV muss an /telemetry senden)</Empty> :
         groups.length === 0 ? <Empty>UGV sendet (noch) keine Kacheln.</Empty> : (
           <Box sx={grid2}>
             {groups.filter((g) => !hidden.has(g.id)).map((g) => (
