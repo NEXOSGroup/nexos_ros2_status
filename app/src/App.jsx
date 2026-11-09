@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   AppBar, Toolbar, Box, Typography, Button, Chip, Tabs, Tab, Stack, Divider,
+  IconButton, Tooltip,
 } from '@mui/material'
+import SettingsIcon from '@mui/icons-material/Settings'
 import logoLight from './assets/nexos-logo-light.png'
 import { useRos, pageIsHttps } from './ros'
 import {
@@ -67,6 +69,13 @@ export default function App() {
           <Box sx={{ flexGrow: 1 }} />
           {route.name !== 'home' && (
             <Button href="#/" size="small" variant="outlined">← Startseite</Button>
+          )}
+          {route.name !== 'settings' && (
+            <Tooltip title="Einstellungen">
+              <IconButton href="#/settings" size="small" sx={{ color: 'text.secondary' }}>
+                <SettingsIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           )}
         </Toolbar>
       </AppBar>

@@ -1031,24 +1031,45 @@ export function HomePanel() {
   const online = list.filter((u) => u.online)
   const offline = list.filter((u) => !u.online)
   return (
-    <Stack spacing={2}>
-      <Box sx={tileGrid}>
-        {online.map((u) => (
-          <HomeTile key={u.id} online title={u.name || u.id}
-            subtitle={`online · ${u.status || 'unbekannt'}`}
-            href={`#/ugv/${encodeURIComponent(u.id)}`} />
-        ))}
-        <HomeTile title="Einstellungen" subtitle="Service · Verbindung" href="#/settings" accent="#58a6ff" />
-      </Box>
-      {online.length === 0 && (
-        <Empty>{fleetError
-          ? 'Service nicht erreichbar.'
-          : 'Kein UGV online. Sobald ein UGV sendet, erscheint hier eine Kachel.'}</Empty>
-      )}
-      {offline.length > 0 && (
-        <Typography variant="caption" color="text.secondary">
-          Offline: {offline.map((u) => u.name || u.id).join(', ')}
+    <Stack spacing={3.5}>
+      {/* Intro */}
+      <Box>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>NEXOS Fleet</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: 680 }}>
+          Live-Status der angemeldeten UGVs. Jeder Roboter, der gerade Daten sendet,
+          erscheint als Kachel — zum Öffnen seiner Telemetrie anklicken.
         </Typography>
+      </Box>
+
+      {/* Online */}
+      <Box>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}>
+          <Typography variant="overline" color="text.secondary">UGVs online</Typography>
+          <Chip size="small" color={online.length ? 'success' : 'default'} variant="outlined" label={online.length} />
+        </Stack>
+        {online.length > 0 ? (
+          <Box sx={tileGrid}>
+            {online.map((u) => (
+              <HomeTile key={u.id} online title={u.name || u.id}
+                subtitle={`online · ${u.status || 'unbekannt'}`}
+                href={`#/ugv/${encodeURIComponent(u.id)}`} />
+            ))}
+          </Box>
+        ) : (
+          <Empty>{fleetError
+            ? 'Service nicht erreichbar.'
+            : 'Kein UGV online. Sobald ein UGV sendet, erscheint hier eine Kachel.'}</Empty>
+        )}
+      </Box>
+
+      {/* Offline */}
+      {offline.length > 0 && (
+        <Box>
+          <Typography variant="overline" color="text.secondary">Offline</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {offline.map((u) => u.name || u.id).join(', ')}
+          </Typography>
+        </Box>
       )}
     </Stack>
   )
