@@ -1,0 +1,13 @@
+# NEXOS ros_status Dashboard (statischer Build) auf Plesk/Apache.
+#
+# Nur relevant, wenn die Subdomain-Docroot UNTERHALB einer bestehenden CMS-Seite
+# (z. B. TYPO3) liegt (z. B. /httpdocs/html/status.<domain>): Deren .htaccess
+# leitet sonst jede nicht existierende Datei per RewriteRule auf index.php um —
+# in unserem Ordner gibt es keine -> Endlos-Redirect (AH00124 -> 500) bzw.
+# Directory-404 (AH01276). RewriteEngine Off schaltet die GEERBTEN Rewrites fuer
+# diesen Ordner ab; die statischen Dateien (index.html, /assets/*) werden direkt
+# ausgeliefert, .well-known/acme-challenge (Let's Encrypt) bleibt erreichbar.
+#
+# Das Dashboard nutzt KEIN Client-Side-Routing (Tabs sind State), daher ist kein
+# SPA-Fallback auf index.html noetig.
+RewriteEngine Off
