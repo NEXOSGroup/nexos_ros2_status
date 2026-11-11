@@ -5,7 +5,7 @@ import {
   Chip, TextField, Button, Stack, Drawer, Box, Typography, LinearProgress,
   IconButton, ToggleButton, ToggleButtonGroup, Divider, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  Snackbar, Alert, CircularProgress,
+  Snackbar, Alert, CircularProgress, Switch, FormControlLabel,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import CloseIcon from '@mui/icons-material/Close'
@@ -13,7 +13,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew'
 import { Gauge, gaugeClasses } from '@mui/x-charts/Gauge'
 import { LineChart } from '@mui/x-charts/LineChart'
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart'
-import { useRos } from './ros'
+import { useRos, pageIsHttps } from './ros'
 
 const grid2 = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))' }
 const LVL = { 10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL' }
@@ -937,48 +937,21 @@ export function OdinPanel({ ros }) {
    zu einem online UGV zu verbinden. Nutzt den bestehenden Connection-Manager
    (useRos.connect) — ein UGV ist nur eine gemeldete ws_url. Funktioniert auch
    ohne aktive ROS-Verbindung (deshalb useRos statt ros-Prop). */
-const DEFAULT_REGISTRY = import.meta.env.VITE_REGISTRY_URL || 'http://localhost:8090'
-
 export function FleetPanel() {
-  const { url, status, connect } = useRos()
-  const [registry, setRegistry] = useState(() => localStorage.getItem('fleet_registry_url') || DEFAULT_REGISTRY)
-  const [ugvs, setUgvs] = useState(null) // null = noch nie geladen
-  const [err, setErr] = useState(null)
-
-  useEffect(() => {
-    let alive = true
-    const base = registry.replace(/\/+$/, '')
-    const poll = async () => {
-      try {
-        const r = await fetch(base + '/ugvs', { cache: 'no-store' })
-        if (!r.ok) throw new Error('HTTP ' + r.status)
-        const data = await r.json()
-        if (alive) { setUgvs(Array.isArray(data) ? data : []); setErr(null) }
-      } catch (e) {
-        if (alive) setErr(String(e.message || e))
-      }
-    }
-    poll()
-    const id = setInterval(poll, 3000)
-    return () => { alive = false; clearInterval(id) }
-  }, [registry])
-
-  const saveRegistry = (v) => { setRegistry(v); try { localStorage.setItem('fleet_registry_url', v) } catch (e) {} }
+  const { url, status, connect, registry, ugvs, fleetError, selectedUgv, setSelectedUgv } = useRos()
   const online = (ugvs || []).filter((u) => u.online).length
 
   return (
     <Stack spacing={2}>
       <Card>
-        <CardHeader title="Flotte · Registry"
+        <CardHeader title="Flotte"
           titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }}
           action={<Chip size="small" color={online ? 'success' : 'default'} variant="outlined" label={`${online} online`} />} />
         <Divider />
-        <CardContent>
-          <Stack direction="row" spacing={1} alignItems="center" useFlexGap sx={{ flexWrap: 'wrap' }}>
-            <TextField size="small" label="Registry-URL" value={registry}
-              onChange={(e) => saveRegistry(e.target.value)} sx={{ width: 'min(420px, 100%)' }} />
-            {err && <Chip size="small" color="error" variant="outlined" label="Registry nicht erreichbar" />}
-          </Stack>
+        <CardContent sx={{ py: 1.25 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ ...mono }}>
+            Service: {registry}{fleetError ? '  —  nicht erreichbar' : ''}
+          </Typography>
         </CardContent>
       </Card>
 
@@ -987,6 +960,7 @@ export function FleetPanel() {
           <Box sx={grid2}>
             {ugvs.map((u) => {
               const isCurrent = status === 'connected' && url === u.ws_url
+              const isConnecting = status === 'connecting' && url === u.ws_url
               return (
                 <Card key={u.id} sx={{ borderColor: u.online ? '#3fb95055' : undefined }}>
                   <CardContent>
@@ -1004,14 +978,379 @@ export function FleetPanel() {
                       <Typography variant="caption" color="text.secondary">zuletzt</Typography>
                       <Typography variant="caption" sx={mono}>{u.age_s}s</Typography>
                     </Box>
-                    <Button size="small" variant={isCurrent ? 'outlined' : 'contained'}
-                      disabled={!u.online || isCurrent} onClick={() => connect(u.ws_url)}>
-                      {isCurrent ? 'verbunden' : 'Verbinden'}
-                    </Button>
+                    <Stack direction="row" spacing={1}>
+                      <Button size="small" variant={selectedUgv === u.id ? 'contained' : 'outlined'}
+                        color="secondary" onClick={() => setSelectedUgv(u.id)}>
+                        {selectedUgv === u.id ? 'ausgewählt' : 'Anzeigen'}
+                      </Button>
+                      <Button size="small" variant={isCurrent ? 'outlined' : 'contained'}
+                        disabled={!u.online || isCurrent || isConnecting} onClick={() => connect(u.ws_url)}>
+                        {isCurrent ? 'verbunden' : isConnecting ? 'verbinde …' : 'Verbinden (ws)'}
+                      </Button>
+                    </Stack>
                   </CardContent>
                 </Card>
               )
             })}
+          </Box>
+        )}
+    </Stack>
+  )
+}
+
+/* ---------------- Startseite (Kacheln) ----------------
+   Landing-Page: eine Kachel pro online UGV (-> Unterseite mit dessen Telemetrie)
+   plus eine Einstellungen-Kachel. Navigiert per Hash-Route. */
+const tileGrid = { display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))' }
+
+function HomeTile({ title, subtitle, href, online, accent }) {
+  return (
+    <Card component="a" href={href} sx={{
+      textDecoration: 'none', color: 'inherit', display: 'block', cursor: 'pointer',
+      borderColor: online ? '#3fb95066' : 'divider',
+      transition: 'border-color .15s ease, transform .15s ease',
+      '&:hover': { borderColor: accent || '#c8a34e', transform: 'translateY(-2px)' },
+    }}>
+      <CardContent>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+          {online !== undefined && (
+            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: online ? '#3fb950' : '#8b98a5' }} />
+          )}
+          <Typography sx={{ fontWeight: 600, fontSize: 18, flexGrow: 1 }}>{title}</Typography>
+          <Typography sx={{ color: 'text.secondary', fontSize: 20, lineHeight: 1 }}>›</Typography>
+        </Stack>
+        <Typography variant="body2" color="text.secondary">{subtitle}</Typography>
+      </CardContent>
+    </Card>
+  )
+}
+
+export function HomePanel() {
+  const { ugvs, fleetError } = useRos()
+  const list = ugvs || []
+  const online = list.filter((u) => u.online)
+  const offline = list.filter((u) => !u.online)
+  return (
+    <Stack spacing={3.5}>
+      {/* Intro */}
+      <Box>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>NEXOS Fleet</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: 680 }}>
+          Live-Status der angemeldeten UGVs. Jeder Roboter, der gerade Daten sendet,
+          erscheint als Kachel — zum Öffnen seiner Telemetrie anklicken.
+        </Typography>
+      </Box>
+
+      {/* Online */}
+      <Box>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}>
+          <Typography variant="overline" color="text.secondary">UGVs online</Typography>
+          <Chip size="small" color={online.length ? 'success' : 'default'} variant="outlined" label={online.length} />
+        </Stack>
+        {online.length > 0 ? (
+          <Box sx={tileGrid}>
+            {online.map((u) => (
+              <HomeTile key={u.id} online title={u.name || u.id}
+                subtitle={`online · ${u.status || 'unbekannt'}`}
+                href={`#/ugv/${encodeURIComponent(u.id)}`} />
+            ))}
+          </Box>
+        ) : (
+          <Empty>{fleetError
+            ? 'Service nicht erreichbar.'
+            : 'Kein UGV online. Sobald ein UGV sendet, erscheint hier eine Kachel.'}</Empty>
+        )}
+      </Box>
+
+      {/* Offline */}
+      {offline.length > 0 && (
+        <Box>
+          <Typography variant="overline" color="text.secondary">Offline</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {offline.map((u) => u.name || u.id).join(', ')}
+          </Typography>
+        </Box>
+      )}
+    </Stack>
+  )
+}
+
+/* ---------------- Einstellungen ---------------- */
+export function SettingsPanel() {
+  const { registry, setRegistry, fleetError, autoConnect, setAutoConnect } = useRos()
+  return (
+    <Stack spacing={2}>
+      <Card>
+        <CardHeader title="Einstellungen"
+          titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }} />
+        <Divider />
+        <CardContent>
+          <Stack spacing={2.5}>
+            <Box>
+              <TextField fullWidth size="small" label="Registry-URL (Service)" value={registry}
+                onChange={(e) => setRegistry(e.target.value)} sx={{ maxWidth: 480 }} />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                Dienst, von dem Flotten-Liste und Telemetrie gelesen werden (https).
+                {fleetError ? ' — derzeit nicht erreichbar.' : ''}
+              </Typography>
+            </Box>
+            {!pageIsHttps && (
+              <Box>
+                <FormControlLabel
+                  control={<Switch checked={autoConnect} onChange={(e) => setAutoConnect(e.target.checked)} />}
+                  label="Automatisch mit online UGV verbinden" />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  Direkte ws-Verbindung zur rosbridge eines UGV — nur im LAN sinnvoll.
+                </Typography>
+              </Box>
+            )}
+          </Stack>
+        </CardContent>
+      </Card>
+    </Stack>
+  )
+}
+
+/* ---------------- Telemetrie (generisch, daten-getrieben) ----------------
+   Rendert das Kachel-Schema (nexos.tiles/1), das ein UGV selbst liefert, aus den
+   https-Snapshots der Registry (GET /telemetry?id=…). KEINE roboterspezifische
+   Logik: neue UGVs bringen ihre Kacheln selbst mit. Der Nutzer waehlt den UGV und
+   blendet Gruppen ein/aus. So muss das Dashboard fuer neue Roboter nie geaendert
+   werden. */
+const SEV_COLOR = { ok: '#3fb950', info: '#58a6ff', warn: '#d29922', error: '#f85149' }
+const sevChip = (s) => ({ ok: 'success', info: 'info', warn: 'warning', error: 'error' }[s] || 'default')
+
+function fmtTile(t) {
+  const v = t.value
+  if (v === null || v === undefined) return '–'
+  if (t.kind === 'hex') { const n = Number(v) >>> 0; return '0x' + n.toString(16).toUpperCase().padStart(4, '0') }
+  if (t.kind === 'number') {
+    const n = Number(v)
+    if (!Number.isFinite(n)) return '–'
+    const s = Number.isInteger(n) ? String(n) : n.toFixed(Math.abs(n) >= 100 ? 1 : 3)
+    return t.unit ? `${s} ${t.unit}` : s
+  }
+  if (t.kind === 'flag') return v ? (t.label || 'aktiv') : '–'
+  return String(v)
+}
+
+const isFiniteNum = (v) => v !== null && v !== undefined && Number.isFinite(Number(v))
+
+function TileShell({ accent, children }) {
+  return (
+    <Box sx={{
+      p: 1.1, borderRadius: 1.5, bgcolor: '#0e1116', minHeight: 70,
+      border: '1px solid', borderColor: 'divider',
+      borderLeft: '3px solid', borderLeftColor: accent || '#2a333d',
+      transition: 'border-color .15s ease, transform .15s ease, box-shadow .15s ease',
+      '&:hover': { borderColor: '#33404c', transform: 'translateY(-1px)', boxShadow: '0 4px 14px rgba(0,0,0,0.35)' },
+    }}>{children}</Box>
+  )
+}
+
+function TileBox({ t, history }) {
+  const col = SEV_COLOR[t.severity]
+  const dim = t.value === null || t.value === undefined
+  const Label = (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.4, lineHeight: 1.3 }}>{t.label}</Typography>
+  )
+  const Value = (
+    <Typography title={fmtTile(t)} sx={{
+      fontFamily: 'ui-monospace,Menlo,monospace', fontWeight: 600, lineHeight: 1.2,
+      fontSize: { xs: 16, sm: 19 }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      color: dim ? 'text.disabled' : (col || 'text.primary'),
+    }}>
+      {fmtTile(t)}
+    </Typography>
+  )
+
+  // Gauge — Roboter liefert kind:'gauge' + min/max
+  if (t.kind === 'gauge' && isFiniteNum(t.value) && isFiniteNum(t.min) && isFiniteNum(t.max)) {
+    return (
+      <TileShell accent={col}>
+        {Label}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+          <Gauge width={58} height={58} value={Number(t.value)} valueMin={Number(t.min)} valueMax={Number(t.max)}
+            sx={{ [`& .${gaugeClasses.valueText}`]: { display: 'none' }, [`& .${gaugeClasses.valueArc}`]: { fill: col || '#c8a34e' }, [`& .${gaugeClasses.referenceArc}`]: { fill: '#1b222b' } }} />
+          {Value}
+        </Box>
+      </TileShell>
+    )
+  }
+
+  // Balken — Roboter liefert kind:'bar' + min/max
+  if (t.kind === 'bar' && isFiniteNum(t.value) && isFiniteNum(t.min) && isFiniteNum(t.max)) {
+    const pct = Math.max(0, Math.min(100, ((Number(t.value) - Number(t.min)) / (Number(t.max) - Number(t.min))) * 100))
+    return (
+      <TileShell accent={col}>
+        {Label}{Value}
+        <LinearProgress variant="determinate" value={pct}
+          sx={{ mt: 0.75, height: 7, borderRadius: 4, bgcolor: '#1b222b', ['& .MuiLinearProgress-bar']: { borderRadius: 4, backgroundColor: col || '#58a6ff' } }} />
+      </TileShell>
+    )
+  }
+
+  // Flag -> Badge
+  if (t.kind === 'flag') {
+    return (
+      <TileShell accent={t.value ? (col || '#d29922') : undefined}>
+        {Label}
+        {t.value
+          ? <Chip size="small" color={sevChip(t.severity || 'warn')} label={t.label || 'aktiv'}
+              sx={{ fontWeight: 600, height: 'auto', maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.3, lineHeight: 1.3 } }} />
+          : <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.disabled' }}>–</Typography>}
+      </TileShell>
+    )
+  }
+
+  // Enum/Status -> farbige Pill
+  if (t.kind === 'enum' || t.kind === 'status') {
+    return (
+      <TileShell accent={col}>
+        {Label}
+        {dim
+          ? <Typography sx={{ fontFamily: 'ui-monospace,Menlo,monospace', color: 'text.disabled' }}>–</Typography>
+          : <Chip size="small" variant="outlined" color={sevChip(t.severity || 'ok')} label={String(t.value)}
+              sx={{ fontWeight: 600, maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', display: 'block', py: 0.3, lineHeight: 1.3 } }} />}
+      </TileShell>
+    )
+  }
+
+  // number / hex / text
+  return (
+    <TileShell accent={col}>
+      {Label}{Value}
+      {t.spark && history && history.length > 1 && (
+        <SparkLineChart data={history} height={30} showHighlight curve="monotoneX"
+          color={col || '#58a6ff'} sx={{ mt: 0.5, ['& .MuiLineElement-root']: { strokeWidth: 1.75 } }} />
+      )}
+    </TileShell>
+  )
+}
+
+export function TelemetryPanel({ ugvId }) {
+  const { registry, ugvs, selectedUgv, setSelectedUgv } = useRos()
+  const activeId = ugvId || selectedUgv
+  const [snap, setSnap] = useState(null)
+  const [err, setErr] = useState(null)
+  const [stale, setStale] = useState(false)
+  const hist = useRef({})
+  const [hidden, setHidden] = useState(() => new Set())
+
+  // sichtbare/versteckte Gruppen je UGV merken + bei UGV-Wechsel Historie leeren
+  useEffect(() => {
+    try {
+      const raw = activeId ? localStorage.getItem('tiles_hidden_' + activeId) : null
+      setHidden(new Set(raw ? JSON.parse(raw) : []))
+    } catch (e) { setHidden(new Set()) }
+    hist.current = {}
+    setSnap(null)
+  }, [activeId])
+
+  useEffect(() => {
+    if (!activeId) return
+    let alive = true
+    const base = (registry || '').replace(/\/+$/, '')
+    const poll = async () => {
+      try {
+        const r = await fetch(`${base}/telemetry?id=${encodeURIComponent(activeId)}`, { cache: 'no-store' })
+        if (r.status === 404) { if (alive) { setSnap(null); setErr(null); setStale(false) } return }
+        if (!r.ok) throw new Error('HTTP ' + r.status)
+        const d = await r.json()
+        if (!alive) return
+        setErr(null); setStale(!d.fresh)
+        const groups = (d.data && Array.isArray(d.data.groups)) ? d.data.groups : []
+        groups.forEach((g) => (g.tiles || []).forEach((t) => {
+          if (t.spark && t.kind === 'number' && t.value != null) {
+            const k = g.id + '.' + t.id
+            const arr = hist.current[k] || []
+            arr.push(Number(t.value)); if (arr.length > 40) arr.shift()
+            hist.current[k] = arr
+          }
+        }))
+        setSnap({ ...d, groups })
+      } catch (e) { if (alive) setErr(String(e.message || e)) }
+    }
+    poll()
+    const id = setInterval(poll, 1000)
+    return () => { alive = false; clearInterval(id) }
+  }, [registry, activeId])
+
+  const toggleGroup = (gid) => setHidden((prev) => {
+    const next = new Set(prev)
+    if (next.has(gid)) next.delete(gid); else next.add(gid)
+    try { localStorage.setItem('tiles_hidden_' + activeId, JSON.stringify([...next])) } catch (e) {}
+    return next
+  })
+
+  const list = ugvs || []
+  const groups = snap?.groups || []
+
+  return (
+    <Stack spacing={2}>
+      <Card>
+        <CardHeader title="Telemetrie" titleTypographyProps={{ variant: 'overline', color: 'text.secondary' }} sx={{ py: 1 }}
+          action={snap ? <Chip size="small" variant="outlined" color={stale ? 'warning' : 'success'}
+            label={stale ? `veraltet · ${snap.age_s}s` : `live · ${snap.age_s}s`} /> : null} />
+        <Divider />
+        <CardContent>
+          <Stack spacing={1.5}>
+            {/* UGV-Auswahl nur im Standalone-Modus; auf der UGV-Unterseite ist der UGV fix. */}
+            {!ugvId && (list.length === 0
+              ? <Typography variant="body2" color="text.secondary">Keine UGVs angemeldet.</Typography>
+              : (
+                <ToggleButtonGroup exclusive size="small" value={selectedUgv} onChange={(e, v) => v && setSelectedUgv(v)}>
+                  {list.map((u) => (
+                    <ToggleButton key={u.id} value={u.id} sx={{ textTransform: 'none', gap: 0.75 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: u.online ? '#3fb950' : '#8b98a5' }} />
+                      {u.name || u.id}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+              ))}
+            {groups.length > 0 ? (
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary">Kacheln:</Typography>
+                {groups.map((g) => (
+                  <ToggleButton key={g.id} value={g.id} size="small" selected={!hidden.has(g.id)}
+                    onChange={() => toggleGroup(g.id)}
+                    sx={{
+                      textTransform: 'none', fontWeight: 600, py: 0.3, px: 1.25, borderRadius: 1.5,
+                      color: 'text.secondary', borderColor: 'divider', lineHeight: 1.4,
+                      transition: 'transform .12s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease',
+                      '&:hover': { borderColor: '#c8a34e', backgroundColor: 'rgba(200,163,78,0.10)', transform: 'translateY(-1px)' },
+                      '&.Mui-selected': {
+                        color: '#0e1116', backgroundColor: '#c8a34e', borderColor: '#c8a34e',
+                        boxShadow: '0 2px 10px rgba(200,163,78,0.35)',
+                        '&:hover': { backgroundColor: '#d6b05a', transform: 'translateY(-1px)' },
+                      },
+                    }}>
+                    {g.title || g.id}
+                  </ToggleButton>
+                ))}
+              </Stack>
+            ) : (ugvId && <Typography variant="caption" color="text.secondary">Wähle oben Kacheln zum Ein-/Ausblenden (sobald welche ankommen).</Typography>)}
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {!activeId ? null :
+        err ? <Empty>Telemetrie nicht erreichbar ({err}).</Empty> :
+        !snap ? <Empty>Warte auf Telemetrie von „{activeId}" … (UGV muss an /telemetry senden)</Empty> :
+        groups.length === 0 ? <Empty>UGV sendet (noch) keine Kacheln.</Empty> : (
+          <Box sx={grid2}>
+            {groups.filter((g) => !hidden.has(g.id)).map((g) => (
+              <Card key={g.id} sx={{ borderColor: g.severity ? (SEV_COLOR[g.severity] + '55') : undefined }}>
+                <CardHeader title={g.title || g.id} titleTypographyProps={{ variant: 'subtitle2' }} sx={{ py: 0.75 }}
+                  action={g.severity ? <Chip size="small" color={sevChip(g.severity)} label={String(g.severity).toUpperCase()} /> : null} />
+                <Divider />
+                <CardContent>
+                  <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))' }}>
+                    {(g.tiles || []).map((t) => <TileBox key={t.id} t={t} history={hist.current[g.id + '.' + t.id]} />)}
+                  </Box>
+                </CardContent>
+              </Card>
+            ))}
           </Box>
         )}
     </Stack>

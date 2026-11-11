@@ -6,18 +6,20 @@ wechselnde IP eines UGV egal — der UGV meldet seine aktuelle rosbridge-Adresse
 selbst.
 
 ```
-UGV (registrar.py) --POST /heartbeat--> Registry (server.js) <--GET /ugvs-- Dashboard / Website
-Dashboard --ws:// direkt (LAN)--> UGV rosbridge   (Telemetrie, erst beim Verbinden)
+UGV --POST /heartbeat--> Registry (server.js) <--GET /ugvs------- Dashboard
+UGV --POST /telemetry--> Registry (Snapshots)  <--GET /telemetry-- Dashboard
 ```
 
-Für „wer ist online" braucht die Website **nur** `GET /ugvs` — keine Telemetrie,
-kein rosbridge-Zugriff. Die eigentliche Telemetrie holt sich das Dashboard
-weiterhin direkt per WebSocket vom UGV (LAN).
+**UGV → Server → Dashboard:** UGVs melden ihre Adresse (Heartbeat) und pushen ihre
+Telemetrie als selbstbeschreibende Kacheln (`nexos.tiles/1`). Das Dashboard liest
+beides per **https** — so braucht die öffentlich gehostete Oberfläche keinen
+Direktzugriff auf die `ws`-LAN-Adresse der Roboter.
 
 ## Teile
 
-- **`server.js`** — die Registry. Reine Node-stdlib (>=18), keine Abhängigkeiten.
-- **`registrar.py`** — Referenz-Client für die **UGV-Seite**. Reine Python-stdlib.
+- **`server.js`** — Registry + Telemetrie-Relay. Reine Node-stdlib (>=18), keine Abhängigkeiten.
+- Die **UGV-Seite** (Registrar, Bridge, Agent) liegt im Repo
+  [`nexos_ros2_status_agent`](https://github.com/NEXOSGroup/nexos_ros2_status_agent).
 
 ## Registry starten
 
@@ -35,20 +37,18 @@ Env: `PORT` (Default 8090), `OFFLINE_TIMEOUT_MS` (Default 10000),
 |---|---|---|
 | `POST` | `/heartbeat` | `{ "id", "name", "ws_url", "status" }` — UGV meldet sich |
 | `GET` | `/ugvs` | Flotte mit `online`/`offline`, `ws_url`, `age_s` |
+| `POST` | `/telemetry` | `{ "id", "data" }` — UGV pusht Kachel-Snapshot (`nexos.tiles/1`) |
+| `GET` | `/telemetry?id=…` | letzter Snapshot eines UGV (`fresh`, `age_s`, `data`) |
 | `GET` | `/healthz` | Health-Check |
 
-`ws_url` muss `ws://…` oder `wss://…` sein. Bodies sind auf 8 KB begrenzt.
+`ws_url` muss `ws://…` oder `wss://…` sein. Heartbeat-Bodies 8 KB, Telemetrie 256 KB.
 
-## Registrar auf dem UGV
+## UGV-Seite
 
-```bash
-REGISTRY_URL=https://fleet.example.com UGV_ID=odin75 UGV_NAME="ODIN 75" \
-  python3 registrar.py
-```
-
-Als systemd-**User**-Service (kein sudo nötig, reiner Outbound-Call) oder neben
-der bestehenden Bridge. Der Registrar erkennt die lokale IP automatisch
-(`--host` überschreibt sie), `--port` setzt den rosbridge-Port (Default 9090).
+Registrar + (roboter-spezifischer) Telemetrie-Pusher laufen auf dem Roboter — Code im
+Repo [`nexos_ros2_status_agent`](https://github.com/NEXOSGroup/nexos_ros2_status_agent).
+Der Registrar meldet `ws_url` per Heartbeat; der Pusher schickt die Telemetrie-Kacheln
+an `/telemetry`.
 
 ## Dashboard
 
