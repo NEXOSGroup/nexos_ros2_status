@@ -1,52 +1,48 @@
 # nexos_ros2_status
 
-**NEXOS `ros_status`** — a live **ROS 2 system-status web dashboard**. The operations
-cockpit for a running ROS 2 stack: node/topic graph, logs, lifecycle, diagnostics,
-`ros2_control` and host vitals — in the browser, no desktop app.
+**NEXOS `ros_status`** — das **Bodenstations-Dashboard** und der **Fleet-Registry-
+Server** für eine NEXOS-UGV-Flotte. Live-ROS-2-Systemstatus und -Telemetrie im
+Browser, ohne Desktop-App.
 
-Part of the NEXOS ROS 2 family (see [`nexos_ros2`](https://github.com/NEXOSGroup/nexos_ros2)).
+Teil der NEXOS-ROS-2-Familie (siehe [`nexos_ros2`](https://github.com/NEXOSGroup/nexos_ros2)).
 Public, **Apache-2.0**.
 
-> Positioning: `ros_status` = **live status & control**. Complementary to **Foxglove**
-> (deep data viz) and **NEXOS.Link** (recorded bags/MCAP). It fills the gap ROS 2 leaves
-> open: the live system state (nodes, errors, lifecycle, controllers) that otherwise only
-> exists on the command line.
+> Positionierung: `ros_status` = **Live-Status & -Telemetrie**. Komplementär zu
+> **Foxglove** (tiefe Datenviz) und **NEXOS.Link** (aufgezeichnete Bags/MCAP).
 
-## Architecture
+## Architektur — UGV → Server → Dashboard
 
 ```
-Browser (roslib.min.js, bundled)  ⇄  rosbridge (ws :9090)  ⇄  ROS 2 graph
-        http static page (:8080)                               + nexos_status_agent
-                                                                 (host vitals → /diagnostics)
+ UGV (ROS 2)            Server (Fleet-Registry)        Dashboard (Browser)
+ ───────────            ───────────────────────        ───────────────────
+ Registrar  ─heartbeat─►  POST /heartbeat  → wer online   GET /ugvs
+ Telemetrie ─push──────►  POST /telemetry  → Snapshots ─► GET /telemetry
+ (ROS-Nodes)            (hält je UGV den letzten Stand)   rendert Kacheln generisch
 ```
 
-- **Backend:** `rosbridge_suite` exposes the ROS 2 graph (topics + any service) over
-  WebSocket; `rosapi` provides node/topic/param discovery.
-- **Frontend:** a single self-contained page (`web/index.html`) using `roslibjs`
-  (bundled locally → works offline / air-gapped).
-- **Companion node:** `nexos_status_agent` publishes host CPU/mem/temp/disk to
-  `/diagnostics` (things rosbridge can't read on its own).
+Die UGVs liefern **nur Werte** (selbstbeschreibende Kacheln, Schema `nexos.tiles/1`);
+das **Design macht das Dashboard**. Weil Telemetrie über den Server läuft, braucht die
+öffentlich (https) gehostete Oberfläche keinen Direktzugriff auf die `ws`-LAN-Adresse
+der Roboter.
 
-## Quickstart (on the robot/Pi)
+## Inhalt dieses Repos
+| Pfad | Was |
+|---|---|
+| `app/` | **Dashboard** (React 19 + MUI + Vite + roslibjs). Kachel-Startseite, pro UGV eine Unterseite mit generischer Telemetrie, Einstellungen. Deploy: `app/DEPLOY.md`. |
+| `nexos_fleet_registry/` | **Server** (Node-stdlib, zero-dep): Heartbeat-Register (`/heartbeat`, `/ugvs`) + Telemetrie-Relay (`/telemetry`). Deploy: `nexos_fleet_registry/DEPLOY.md`. |
 
-```bash
-sudo apt install -y ros-<distro>-rosbridge-suite   # e.g. ros-lyrical-rosbridge-suite
-# serve the page + bridge (see scripts/install.sh for systemd autostart)
-ros2 launch rosbridge_server rosbridge_websocket_launch.xml &   # :9090
-( cd web && python3 -m http.server 8080 )                       # :8080
-# optional host vitals:
-# colcon build --packages-select nexos_status_agent && ros2 run nexos_status_agent agent
-```
+## UGV-Seite (separates Repo)
+Die Teile, die **auf dem Roboter** laufen (rosbridge-Bridge, Status-Agent, Registrar,
+On-Host-Install), liegen in
+**[`nexos_ros2_status_agent`](https://github.com/NEXOSGroup/nexos_ros2_status_agent)**.
+Roboter-spezifische Dekodierung/Telemetrie (z. B. ODIN) im jeweiligen Roboter-Repo
+(z. B. `ODIN.75_TDW`).
 
-Open **http://<robot-ip>:8080** in a normal browser (the built-in preview panes of some
-tools block LAN WebSockets).
+## Live
+- Dashboard: `https://status.alps-robotics.com`
+- Registry/Service: `https://fleet.alps-robotics.com`
 
-`scripts/install.sh` installs systemd services for autostart (`ros-rosbridge`,
-`ros-status-web`).
-
-## Status
-
-- **v1 (now):** connection status, live node list, `/rosout` log with level filter.
-- **v2+:** see [ROADMAP.md](ROADMAP.md) — topics+Hz, node details+params, lifecycle,
-  diagnostics, `ros2_control` cockpit (controllers, hardware, overruns, joints), health
-  header, host vitals, alerts, auth, design.
+## Technik-Hinweise
+- MUI = React; Vite nur Build. roslib 2.x: **kein** Default-Export (`import * as ROSLIB`),
+  **kein** `ServiceRequest` (callService nimmt ein Plain-Object).
+- Roadmap: [ROADMAP.md](ROADMAP.md).
